@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  collector:
+    build: .
+    container_name: flow-collector
+    ports:
+      - "2055:2055/udp"
+      - "4739:4739/udp"
+    environment:
+      - CLICKHOUSE_HOST=192.168.10.12
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=admin
+      - CLICKHOUSE_PASSWORD=111aaaBBB
+    command: python flow_collector.py --bind 0.0.0.0 --nf-port 2055 --ipfix-port 4739
+    restart: unless-stopped
+
+  web-ui:
+    build: .
+    container_name: flow-web-ui
+    environment:
+      - SQLITE_DB_PATH=/data/flows.db
+      - CLICKHOUSE_HOST=192.168.10.12
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=admin
+      - CLICKHOUSE_PASSWORD=111aaaBBB
+    ports:
+      - "8000:8000"
+    command: uvicorn web_ui:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    volumes:
+      - db-data:/data
+
+volumes:
+  db-data:

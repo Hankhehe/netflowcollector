@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Netflow Collector Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Vanilla CSS -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i data-lucide="activity" class="brand-icon"></i>
+                <div class="brand-text">
+                    <h1>Netflow Collector</h1>
+                    <span>Management Web Console</span>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" id="btn-tab-explorer">
+                    <i data-lucide="search"></i>
+                    <span>Flow Explorer</span>
+                </a>
+                <a href="#" class="nav-item" id="btn-tab-analytics">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Traffic Analytics</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator online">
+                    <span class="dot"></span>
+                    <span class="text">DB Connected</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-title">
+                    <h2>Dashboard Overview</h2>
+                    <p class="subtitle" id="time-range-summary">Overview of the last 24 hours of traffic</p>
+                </div>
+                <div class="header-actions">
+                    <!-- Global Custom Time Range (hidden by default) -->
+                    <div id="global-custom-time-wrapper" style="display: none; align-items: center; gap: 8px;">
+                        <div class="form-group-inline">
+                            <label for="global-start-time">From</label>
+                            <input type="datetime-local" id="global-start-time" class="form-control select-dark select-sm">
+                        </div>
+                        <div class="form-group-inline">
+                            <label for="global-end-time">To</label>
+                            <input type="datetime-local" id="global-end-time" class="form-control select-dark select-sm">
+                        </div>
+                    </div>
+                    
+                    <select id="global-time-range" class="form-control select-dark">
+                        <option value="1h">Last 1 Hour</option>
+                        <option value="24h" selected>Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="custom">Specific Time</option>
+                    </select>
+                    <button class="btn btn-primary" id="btn-refresh">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Refresh</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Cards Grid -->
+            <section class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-icon-wrapper blue">
+                        <i data-lucide="navigation"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Total Flows</span>
+                        <h3 class="kpi-value" id="kpi-total-flows">-</h3>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon-wrapper green">
+                        <i data-lucide="hard-drive"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Total Volume</span>
+                        <h3 class="kpi-value" id="kpi-total-bytes">-</h3>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon-wrapper purple">
+                        <i data-lucide="layers"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Total Packets</span>
+                        <h3 class="kpi-value" id="kpi-total-packets">-</h3>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon-wrapper orange">
+                        <i data-lucide="server"></i>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Active Exporters</span>
+                        <h3 class="kpi-value" id="kpi-total-exporters">-</h3>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Shared Filters Card -->
+            <div class="card filter-card">
+                <div class="card-body">
+                    <form id="filter-form">
+                        <div class="filter-flex-row">
+                            <!-- Data Source Custom Dropdown -->
+                            <div class="form-group">
+                                <label>Data Source</label>
+                                <div class="custom-dropdown" id="dropdown-table">
+                                    <div class="dropdown-trigger">
+                                        <span class="trigger-label" id="label-table">All Data Sources</span>
+                                        <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                                    </div>
+                                    <div class="dropdown-menu-panel" id="filter-table-group">
+                                        <label class="checkbox-label"><input type="checkbox" name="table" value="ipfix" checked> IPFIX</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="table" value="netflow9" checked> NetFlow v9</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Exporter IP Custom Dropdown -->
+                            <div class="form-group">
+                                <label>Exporter IP</label>
+                                <div class="custom-dropdown" id="dropdown-exporter">
+                                    <div class="dropdown-trigger">
+                                        <span class="trigger-label" id="label-exporter">All Exporters</span>
+                                        <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                                    </div>
+                                    <div class="dropdown-menu-panel" id="filter-exporter-group">
+                                        <!-- Dynamically populated from JS -->
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Source IP -->
+                            <div class="form-group">
+                                <label for="filter-src">Source IP (Prefix)</label>
+                                <input type="text" id="filter-src" class="form-control form-control-sm" placeholder="e.g. 192.168.">
+                            </div>
+                            
+                            <!-- Destination IP -->
+                            <div class="form-group">
+                                <label for="filter-dst">Destination IP (Prefix)</label>
+                                <input type="text" id="filter-dst" class="form-control form-control-sm" placeholder="e.g. 10.0.0.">
+                            </div>
+                            
+                            <!-- Ports -->
+                            <div class="form-group">
+                                <label>Ports (Src / Dst)</label>
+                                <div class="ports-flex-row">
+                                    <input type="number" id="filter-sport" class="form-control form-control-sm" placeholder="Src">
+                                    <input type="number" id="filter-dport" class="form-control form-control-sm" placeholder="Dst">
+                                </div>
+                            </div>
+                            
+                            <!-- Protocols Custom Dropdown -->
+                            <div class="form-group">
+                                <label>Protocols</label>
+                                <div class="custom-dropdown" id="dropdown-proto">
+                                    <div class="dropdown-trigger">
+                                        <span class="trigger-label" id="label-proto">All Protocols</span>
+                                        <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                                    </div>
+                                    <div class="dropdown-menu-panel" id="filter-proto-group">
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="TCP" checked> TCP (6)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="UDP" checked> UDP (17)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="ICMP" checked> ICMP (1)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="IGMP" checked> IGMP (2)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="OSPF" checked> OSPF (89)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="SCTP" checked> SCTP (132)</label>
+                                        <label class="checkbox-label"><input type="checkbox" name="proto" value="N/A" checked> N/A (None)</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Columns & Grouping Custom Dropdown -->
+                            <div class="form-group">
+                                <label>Columns & Grouping</label>
+                                <div class="custom-dropdown" id="dropdown-columns">
+                                    <div class="dropdown-trigger">
+                                        <span class="trigger-label" id="label-columns">All Columns</span>
+                                        <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                                    </div>
+                                    <div class="dropdown-menu-panel" id="column-toggles">
+                                        <label class="checkbox-label"><input type="checkbox" value="type" checked> Type</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="ts" checked> Timestamp</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="exporter" checked> Exporter</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="src" checked> Src IP</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="sport" checked> Src Port</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="dst" checked> Dst IP</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="dport" checked> Dst Port</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="proto" checked> Protocol</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Actions Buttons -->
+                            <div class="form-group form-actions-group">
+                                <div class="action-buttons-flex">
+                                    <button type="button" id="btn-reset-filters" class="btn btn-secondary btn-sm-action">Reset</button>
+                                    <button type="submit" class="btn btn-primary btn-sm-action">Apply</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Explorer View -->
+            <section id="view-explorer" class="dashboard-view active">
+                <div class="explorer-layout">
+
+                    <!-- Flow Data Table -->
+                    <div class="card table-card flex-grow">
+                        <div class="card-header table-header">
+                            <h3><i data-lucide="list" class="icon-sm"></i> Flow Records</h3>
+                            <div class="header-pagination-wrapper">
+                                <div class="page-size-selector">
+                                    <label for="page-size">Limit</label>
+                                    <select id="page-size" class="form-control select-sm">
+                                        <option value="25">25</option>
+                                        <option value="50" selected>50</option>
+                                        <option value="100">100</option>
+                                        <option value="250">250</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn btn-secondary" id="btn-export-csv" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+                                    <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                    <span>Export CSV</span>
+                                </button>
+                                <div class="pagination-summary">
+                                    Showing <span id="flow-range-start">0</span> to <span id="flow-range-end">0</span> of <span id="flow-total-filtered">0</span>
+                                </div>
+                                <div class="pagination" id="flows-pagination"></div>
+                            </div>
+                        </div>
+                        <div class="card-body no-padding table-responsive">
+                            <table class="data-table" id="flows-table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable col-type" data-sort="type">Type <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-ts" data-sort="ts">Timestamp (UTC) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-exporter" data-sort="exporter">Exporter <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-src" data-sort="src">Source IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-sport" data-sort="sport">Src Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-dst" data-sort="dst">Destination IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-dport" data-sort="dport">Dst Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-proto" data-sort="proto">Proto <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-packets" data-sort="packets">Packets <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-octets" data-sort="octets">Bytes <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="flows-tbody">
+                                    <tr>
+                                        <td colspan="10" class="text-center text-muted py-5">
+                                            <div class="spinner"></div>
+                                            Loading flow records...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analytics View -->
+            <section id="view-analytics" class="dashboard-view">
+                <div class="analytics-grid">
+                    <!-- Traffic Over Time Card -->
+                    <div class="card span-full">
+                        <div class="card-header">
+                            <h3><i data-lucide="trending-up" class="icon-sm"></i> Traffic Volume Over Time</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-traffic-time"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Top Sources Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="arrow-up-right" class="icon-sm"></i> Top Sources (Talkers)</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-sources"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Top Destinations Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="arrow-down-left" class="icon-sm"></i> Top Destinations</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-destinations"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Top Source Ports Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="hash" class="icon-sm"></i> Top 10 Source Ports</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-src-ports"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Top Destination Ports Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="hash" class="icon-sm"></i> Top 10 Destination Ports</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-dst-ports"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Protocols distribution -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="pie-chart" class="icon-sm"></i> Protocols Distribution</h3>
+                        </div>
+                        <div class="card-body chart-container flex-center">
+                            <div class="doughnut-wrapper">
+                                <canvas id="chart-protocols"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Top Exporters -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="activity" class="icon-sm"></i> Top Active Exporters</h3>
+                        </div>
+                        <div class="card-body chart-container flex-center">
+                            <div class="doughnut-wrapper">
+                                <canvas id="chart-exporters"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Flow Details Modal -->
+    <div id="details-modal" class="modal-overlay">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Flow Log Details</h3>
+                <button class="btn-close" id="btn-close-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="details-grid">
+                    <div class="detail-item">
+                        <span class="label">ID</span>
+                        <span class="value" id="detail-id"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Time (UTC)</span>
+                        <span class="value" id="detail-ts"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Collector Protocol</span>
+                        <span class="value badge badge-info" id="detail-type"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Exporter Address</span>
+                        <span class="value" id="detail-exporter"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Source IP</span>
+                        <span class="value" id="detail-src" style="font-weight: 600;"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Source Domain</span>
+                        <span class="value text-muted" id="detail-src-domain"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Destination IP</span>
+                        <span class="value" id="detail-dst" style="font-weight: 600;"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Destination Domain</span>
+                        <span class="value text-muted" id="detail-dst-domain"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">IP Protocol</span>
+                        <span class="value badge badge-success" id="detail-proto"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Total Octets (Bytes)</span>
+                        <span class="value" id="detail-octets"></span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Total Packets</span>
+                        <span class="value" id="detail-packets"></span>
+                    </div>
+                </div>
+
+                <h4 class="section-title">Raw JSON Payload (From Collector)</h4>
+                <pre class="code-block"><code id="detail-raw-json"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Script -->
+    <script src="app.js"></script>
+</body>
+</html>
