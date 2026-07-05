@@ -1065,6 +1065,17 @@ th.sort-active .sort-icon {
     white-space: nowrap;
 }
 
+/* Danger Button Styling */
+.btn-danger {
+    background-color: var(--color-danger);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #dc2626;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+
 
 
 

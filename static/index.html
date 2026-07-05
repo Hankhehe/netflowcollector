@@ -35,6 +35,10 @@
                     <i data-lucide="bar-chart-2"></i>
                     <span>Traffic Analytics</span>
                 </a>
+                <a href="#" class="nav-item" id="btn-tab-settings">
+                    <i data-lucide="database"></i>
+                    <span>Data Management</span>
+                </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-indicator online">
@@ -358,6 +362,40 @@
                             <div class="doughnut-wrapper">
                                 <canvas id="chart-exporters"></canvas>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings / Data Management View -->
+            <section id="view-settings" class="dashboard-view">
+                <div class="card" style="max-width: 600px; margin: 40px auto 0 auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur);">
+                    <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; gap: 8px;">
+                        <i data-lucide="database" class="icon-sm" style="color: var(--color-danger);"></i>
+                        <h3 style="font-size: 1.1rem; font-weight: 600;">Manual Data Cleanup</h3>
+                    </div>
+                    <div class="card-body" style="padding: 24px;">
+                        <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
+                            Here you can manually delete flow logs that are older than a specific date. 
+                            This operation will run asynchronously in the background on the database level.
+                        </p>
+                        
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label for="cleanup-before-date" style="display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; color: var(--text-primary);">
+                                Delete all data before:
+                            </label>
+                            <input type="datetime-local" id="cleanup-before-date" class="form-control select-dark" style="width: 100%; max-width: 320px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-sans);">
+                            <span class="text-muted" style="display: block; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);">
+                                Select a date and time. All IPFIX and NetFlow v9 records before this timestamp will be deleted.
+                            </span>
+                        </div>
+                        
+                        <button class="btn btn-danger" id="btn-execute-cleanup">
+                            <i data-lucide="trash-2"></i>
+                            <span>Execute Cleanup</span>
+                        </button>
+                        
+                        <div id="cleanup-status-message" style="margin-top: 20px; padding: 14px 18px; border-radius: 8px; display: none; font-size: 0.88rem; line-height: 1.4;">
                         </div>
                     </div>
                 </div>

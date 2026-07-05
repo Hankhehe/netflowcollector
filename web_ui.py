@@ -1089,6 +1089,32 @@ def get_stats(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/flows/delete")
+def delete_flows_before(before: str = Query(..., description="Delete data before this datetime, format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")):
+    try:
+        cutoff_dt = None
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                cutoff_dt = datetime.strptime(before, fmt)
+                break
+            except ValueError:
+                continue
+        
+        if not cutoff_dt:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
+            
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
+        client = get_ch_client()
+        client.command("ALTER TABLE ipfix DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
+        client.command("ALTER TABLE netflow9 DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
+        
+        return {"status": "success", "message": f"Successfully queued deletion mutation in ClickHouse for records older than {cutoff_str}."}
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Serve Static files. Ensure static directory exists
 os.makedirs("static", exist_ok=True)
 

@@ -30,8 +30,13 @@ let state = {
 const els = {
     btnTabExplorer: document.getElementById('btn-tab-explorer'),
     btnTabAnalytics: document.getElementById('btn-tab-analytics'),
+    btnTabSettings: document.getElementById('btn-tab-settings'),
     viewExplorer: document.getElementById('view-explorer'),
     viewAnalytics: document.getElementById('view-analytics'),
+    viewSettings: document.getElementById('view-settings'),
+    cleanupBeforeDate: document.getElementById('cleanup-before-date'),
+    btnExecuteCleanup: document.getElementById('btn-execute-cleanup'),
+    cleanupStatusMessage: document.getElementById('cleanup-status-message'),
     globalTimeRange: document.getElementById('global-time-range'),
     btnRefresh: document.getElementById('btn-refresh'),
     timeRangeSummary: document.getElementById('time-range-summary'),
@@ -101,6 +106,15 @@ function setupEventListeners() {
     els.btnTabAnalytics.addEventListener('click', (e) => {
         e.preventDefault();
         switchTab('analytics');
+    });
+
+    els.btnTabSettings.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchTab('settings');
+    });
+
+    els.btnExecuteCleanup.addEventListener('click', () => {
+        executeCleanup();
     });
     
     // Global actions
@@ -207,6 +221,12 @@ function setupEventListeners() {
 function switchTab(tabName) {
     state.activeTab = tabName;
     
+    // Hide filter card if settings tab is active
+    const filterCard = document.querySelector('.filter-card');
+    if (filterCard) {
+        filterCard.style.display = tabName === 'settings' ? 'none' : 'block';
+    }
+    
     const columnsDropdown = document.getElementById('dropdown-columns');
     if (columnsDropdown) {
         const formGroup = columnsDropdown.closest('.form-group');
@@ -215,18 +235,28 @@ function switchTab(tabName) {
         }
     }
     
+    // Remove active from all tabs and views
+    els.btnTabExplorer.classList.remove('active');
+    els.btnTabAnalytics.classList.remove('active');
+    els.btnTabSettings.classList.remove('active');
+    
+    els.viewExplorer.classList.remove('active');
+    els.viewAnalytics.classList.remove('active');
+    els.viewSettings.classList.remove('active');
+    
+    // Activate selected tab and view
     if (tabName === 'explorer') {
         els.btnTabExplorer.classList.add('active');
-        els.btnTabAnalytics.classList.remove('active');
         els.viewExplorer.classList.add('active');
-        els.viewAnalytics.classList.remove('active');
-    } else {
-        els.btnTabExplorer.classList.remove('active');
+        refreshData();
+    } else if (tabName === 'analytics') {
         els.btnTabAnalytics.classList.add('active');
-        els.viewExplorer.classList.remove('active');
         els.viewAnalytics.classList.add('active');
+        refreshData();
+    } else if (tabName === 'settings') {
+        els.btnTabSettings.classList.add('active');
+        els.viewSettings.classList.add('active');
     }
-    refreshData();
 }
 
 // Update time summary subtitle
@@ -1072,5 +1102,70 @@ function toUtcTimestamp(localStr) {
         return d.toISOString().replace('T', ' ').substring(0, 19);
     } catch (e) {
         return '';
+    }
+}
+
+// Execute Data Cleanup API POST Request
+async function executeCleanup() {
+    const beforeVal = els.cleanupBeforeDate.value;
+    if (!beforeVal) {
+        showCleanupStatus('Please select a date and time.', 'error');
+        return;
+    }
+    
+    const utcDate = toUtcTimestamp(beforeVal);
+    if (!utcDate) {
+        showCleanupStatus('Invalid date selected.', 'error');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete all NetFlow data before ${utcDate} (UTC)? This action cannot be undone.`)) {
+        return;
+    }
+    
+    showCleanupStatus('Executing cleanup...', 'info');
+    els.btnExecuteCleanup.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/flows/delete?before=${encodeURIComponent(utcDate)}`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+            showCleanupStatus(data.message || 'Cleanup successfully initiated.', 'success');
+            els.cleanupBeforeDate.value = ''; // Reset input
+        } else {
+            showCleanupStatus(data.detail || 'Failed to initiate cleanup.', 'error');
+        }
+    } catch (err) {
+        showCleanupStatus(`Network error: ${err.message}`, 'error');
+    } finally {
+        els.btnExecuteCleanup.disabled = false;
+    }
+}
+
+function showCleanupStatus(message, type) {
+    const el = els.cleanupStatusMessage;
+    el.style.display = 'block';
+    el.innerText = message;
+    
+    // Reset background and borders
+    el.style.backgroundColor = '';
+    el.style.color = '';
+    el.style.border = '';
+    
+    if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else { // info
+        el.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+        el.style.color = '#818cf8';
+        el.style.border = '1px solid rgba(99, 102, 241, 0.3)';
     }
 }
