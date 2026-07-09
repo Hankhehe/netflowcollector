@@ -873,6 +873,7 @@ def export_flows(
 
         # CSV generator
         def csv_generator():
+            yield "\ufeff"
             output = io.StringIO()
             writer = csv.writer(output)
             
@@ -1577,7 +1578,7 @@ def check_flow_match(flow: Dict[str, Any], parsed_rules: List[Dict[str, Any]]) -
             
     return None
 
-def run_traffic_audit() -> Dict[str, Any]:
+def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
     print("[Audit] Starting traffic audit...", flush=True)
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1595,17 +1596,31 @@ def run_traffic_audit() -> Dict[str, Any]:
             
         parsed_rules = parse_rule_criteria(rules)
         
-        cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
-        row = cur.fetchone()
-        
-        if row:
-            last_run_str = row["run_ts"]
+        if start_time_str:
             try:
-                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
+                if 'T' in start_time_str:
+                    try:
+                        # Parsing from datetime-local ISO format: YYYY-MM-DDTHH:MM
+                        # Convert user's local UTC+8 time input to UTC naive datetime
+                        dt_local = datetime.fromisoformat(start_time_str)
+                        last_run_dt = dt_local - timedelta(hours=8)
+                    except Exception:
+                        last_run_dt = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
+                else:
+                    last_run_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+            except Exception:
                 last_run_dt = datetime.utcnow() - timedelta(days=7)
         else:
-            last_run_dt = datetime.utcnow() - timedelta(days=7)
+            cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                last_run_str = row["run_ts"]
+                try:
+                    last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    last_run_dt = datetime.utcnow() - timedelta(days=7)
+            else:
+                last_run_dt = datetime.utcnow() - timedelta(days=7)
             
         current_run_dt = datetime.utcnow()
         last_run_str = last_run_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -1829,9 +1844,13 @@ def delete_audit_rule(rule_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class AuditRunRequest(BaseModel):
+    start_time: Optional[str] = None
+
 @app.post("/api/audit/run")
-def trigger_audit():
-    result = run_traffic_audit()
+def trigger_audit(payload: Optional[AuditRunRequest] = None):
+    start_time_str = payload.start_time if payload else None
+    result = run_traffic_audit(start_time_str)
     if result["status"] == "success":
         return result
     else:
@@ -1902,7 +1921,9 @@ def get_audit_matches(
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
-    flag: Optional[str] = Query(None)
+    flag: Optional[str] = Query(None),
+    sort_by: str = Query("match_ts"),
+    sort_order: str = Query("desc")
 ):
     try:
         client = get_ch_client()
@@ -1936,11 +1957,21 @@ def get_audit_matches(
         count_result = client.query(count_query, parameters=params)
         total_records = count_result.result_rows[0][0]
         
+        # Validate sort field to prevent SQL injection
+        allowed_cols = {
+            "match_ts", "ts", "match_flag", "rule_ip", "rule_port",
+            "src", "sport", "dst", "dport", "proto", "packets", "octets"
+        }
+        if sort_by not in allowed_cols:
+            sort_by = "match_ts"
+            
+        order_sql = "DESC" if sort_order.lower() == "desc" else "ASC"
+        
         query = f"""
             SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts, rule_ip, rule_port, match_flag, match_ts
             FROM matched_flows
             {where_sql}
-            ORDER BY match_ts DESC, ts DESC
+            ORDER BY {sort_by} {order_sql}, ts DESC
             LIMIT %(limit)s OFFSET %(offset)s
         """
         params["limit"] = limit
@@ -1965,8 +1996,10 @@ def get_audit_matches(
                 
         dns_map = get_dns_mappings(ips_to_resolve)
         for r in records:
-            r["src_domain"] = dns_map.get(r.get("src"), "")
-            r["dst_domain"] = dns_map.get(r.get("dst"), "")
+            r["src_domain"] = ip_aliases_cache.get(r.get("src"), dns_map.get(r.get("src"), ""))
+            r["dst_domain"] = ip_aliases_cache.get(r.get("dst"), dns_map.get(r.get("dst"), ""))
+            r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
+            r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
             
         return {
             "total": total_records,
@@ -2062,6 +2095,7 @@ def export_audit_matches(
         
         # CSV generator
         def csv_generator():
+            yield "\ufeff"
             output = io.StringIO()
             writer = csv.writer(output)
             

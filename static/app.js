@@ -44,6 +44,10 @@ let state = {
         by: 'ts',
         order: 'desc'
     },
+    auditSorting: {
+        by: 'match_ts',
+        order: 'desc'
+    },
     records: [], // Cache for current page records
     charts: {}   // Store Chart.js instances
 };
@@ -75,6 +79,12 @@ const els = {
     auditLastRunMatches: document.getElementById('audit-last-run-matches'),
     auditLastRunMessage: document.getElementById('audit-last-run-message'),
     auditTriggerStatus: document.getElementById('audit-trigger-status'),
+    auditTriggerModal: document.getElementById('audit-trigger-modal'),
+    btnCloseTriggerModal: document.getElementById('btn-close-trigger-modal'),
+    btnCancelTriggerAudit: document.getElementById('btn-cancel-trigger-audit'),
+    btnConfirmTriggerAudit: document.getElementById('btn-confirm-trigger-audit'),
+    auditOptionLastRunLabel: document.getElementById('audit-option-last-run-label'),
+    auditCustomStartTime: document.getElementById('audit-custom-start-time'),
     auditRuleForm: document.getElementById('audit-rule-form'),
     auditInputIp: document.getElementById('audit-input-ip'),
     auditInputPort: document.getElementById('audit-input-port'),
@@ -163,6 +173,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     setupHeaderSorting();
     updateHeaderSortIcons();
+    setupAuditHeaderSorting();
+    updateAuditHeaderSortIcons();
     setupColumnToggles();
     setupDropdowns();
     fetchExporterDropdown();
@@ -236,7 +248,71 @@ function setupEventListeners() {
 
     if (els.btnTriggerAudit) {
         els.btnTriggerAudit.addEventListener('click', () => {
-            triggerManualAudit();
+            if (els.auditTriggerModal) {
+                // Populate last run time label in the modal
+                const lastRunText = els.auditLastRunTime ? els.auditLastRunTime.innerText : '-';
+                if (els.auditOptionLastRunLabel) {
+                    els.auditOptionLastRunLabel.innerText = `上次時間: ${lastRunText}`;
+                }
+                
+                // Reset radios to "last-run"
+                const defaultRadio = document.querySelector('input[name="audit-range-option"][value="last-run"]');
+                if (defaultRadio) defaultRadio.checked = true;
+                
+                // Hide custom start time input initially
+                if (els.auditCustomStartTime) {
+                    els.auditCustomStartTime.style.display = 'none';
+                    els.auditCustomStartTime.value = '';
+                }
+                
+                // Show modal
+                els.auditTriggerModal.classList.add('active');
+            }
+        });
+    }
+
+    // Modal toggle radio inputs visibility
+    const radioOptions = document.querySelectorAll('input[name="audit-range-option"]');
+    radioOptions.forEach(radio => {
+        radio.addEventListener('change', () => {
+            if (els.auditCustomStartTime) {
+                els.auditCustomStartTime.style.display = (radio.value === 'custom') ? 'block' : 'none';
+            }
+        });
+    });
+
+    // Close trigger modal triggers
+    const closeTriggerModal = () => {
+        if (els.auditTriggerModal) {
+            els.auditTriggerModal.classList.remove('active');
+        }
+    };
+    if (els.btnCloseTriggerModal) {
+        els.btnCloseTriggerModal.addEventListener('click', closeTriggerModal);
+    }
+    if (els.btnCancelTriggerAudit) {
+        els.btnCancelTriggerAudit.addEventListener('click', closeTriggerModal);
+    }
+
+    // Confirm trigger audit
+    if (els.btnConfirmTriggerAudit) {
+        els.btnConfirmTriggerAudit.addEventListener('click', () => {
+            closeTriggerModal();
+            
+            const selectedOption = document.querySelector('input[name="audit-range-option"]:checked')?.value || 'last-run';
+            let startTime = null;
+            
+            if (selectedOption === 'all-time') {
+                startTime = '1970-01-01 00:00:00';
+            } else if (selectedOption === 'custom') {
+                if (!els.auditCustomStartTime.value) {
+                    alert('請選擇自訂的開始時間！');
+                    return;
+                }
+                startTime = els.auditCustomStartTime.value; // e.g. "2026-07-09T10:30"
+            }
+            
+            triggerManualAudit(startTime);
         });
     }
 
@@ -1325,7 +1401,7 @@ function destroyChart(canvasId) {
 
 // Setup Header Sorting click listeners
 function setupHeaderSorting() {
-    const headers = document.querySelectorAll('th.sortable');
+    const headers = document.querySelectorAll('#flows-table th.sortable');
     headers.forEach(th => {
         th.addEventListener('click', () => {
             const sortBy = th.getAttribute('data-sort');
@@ -1345,7 +1421,7 @@ function setupHeaderSorting() {
 
 // Update header sorting icons state
 function updateHeaderSortIcons() {
-    const headers = document.querySelectorAll('th.sortable');
+    const headers = document.querySelectorAll('#flows-table th.sortable');
     headers.forEach(th => {
         const sortBy = th.getAttribute('data-sort');
         const icon = th.querySelector('.sort-icon');
@@ -1364,6 +1440,54 @@ function updateHeaderSortIcons() {
         }
     });
     // Re-initialize Lucide Icons so they re-render the new icon types
+    lucide.createIcons();
+}
+
+// Setup Audit Tables Header Sorting click listeners
+function setupAuditHeaderSorting() {
+    const headers = document.querySelectorAll('#anomalies-table th.sortable, #audit-matches-table th.sortable');
+    headers.forEach(th => {
+        th.addEventListener('click', () => {
+            const sortBy = th.getAttribute('data-sort');
+            if (state.auditSorting.by === sortBy) {
+                state.auditSorting.order = state.auditSorting.order === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.auditSorting.by = sortBy;
+                state.auditSorting.order = 'desc';
+            }
+            updateAuditHeaderSortIcons();
+            
+            // Reset pagination offsets
+            state.auditPagination.offset = 0;
+            state.anomaliesPagination.offset = 0;
+            
+            // Fetch matches & anomalies report
+            fetchAuditMatches();
+            fetchAnomalousReport();
+        });
+    });
+}
+
+// Update audit tables header sorting icons state
+function updateAuditHeaderSortIcons() {
+    const headers = document.querySelectorAll('#anomalies-table th.sortable, #audit-matches-table th.sortable');
+    headers.forEach(th => {
+        const sortBy = th.getAttribute('data-sort');
+        const icon = th.querySelector('.sort-icon');
+        if (icon) {
+            if (sortBy === state.auditSorting.by) {
+                th.classList.add('sort-active');
+                if (state.auditSorting.order === 'asc') {
+                    icon.setAttribute('data-lucide', 'chevron-up');
+                } else {
+                    icon.setAttribute('data-lucide', 'chevron-down');
+                }
+            } else {
+                th.classList.remove('sort-active');
+                icon.setAttribute('data-lucide', 'chevrons-up-down');
+            }
+        }
+    });
     lucide.createIcons();
 }
 
@@ -2184,12 +2308,17 @@ async function fetchAuditStatus() {
 }
 
 // Trigger manual audit
-async function triggerManualAudit() {
+async function triggerManualAudit(startTime = null) {
     showAuditTriggerStatus('正在執行流量比對盤查，請稍候...', 'info');
     els.btnTriggerAudit.disabled = true;
     
     try {
-        const response = await fetch('/api/audit/run', { method: 'POST' });
+        const reqBody = startTime ? { start_time: startTime } : {};
+        const response = await fetch('/api/audit/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody)
+        });
         const data = await response.json();
         
         if (response.ok) {
@@ -2212,7 +2341,7 @@ async function fetchAuditMatches() {
     const limit = state.auditPagination.limit;
     const offset = state.auditPagination.offset;
     
-    let url = `/api/audit/matches?limit=${limit}&offset=${offset}`;
+    let url = `/api/audit/matches?limit=${limit}&offset=${offset}&sort_by=${state.auditSorting.by}&sort_order=${state.auditSorting.order}`;
     if (state.auditFilters.src) url += `&src=${encodeURIComponent(state.auditFilters.src)}`;
     if (state.auditFilters.dst) url += `&dst=${encodeURIComponent(state.auditFilters.dst)}`;
     if (state.auditFilters.port) url += `&port=${encodeURIComponent(state.auditFilters.port)}`;
@@ -2258,6 +2387,8 @@ function renderAuditMatches(records) {
         
         const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
         const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
+        const sportAliasSub = r.sport_name ? `<div class="domain-subtext" title="${r.sport_name}">${r.sport_name}</div>` : '';
+        const dportAliasSub = r.dport_name ? `<div class="domain-subtext" title="${r.dport_name}">${r.dport_name}</div>` : '';
         
         return `
             <tr class="flow-row" onclick="showAuditFlowDetails(${idx})">
@@ -2272,12 +2403,18 @@ function renderAuditMatches(records) {
                     <div>${r.src}</div>
                     ${srcDomainSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.sport}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">
+                    <div>${r.sport}</div>
+                    ${sportAliasSub}
+                </td>
                 <td style="padding: 10px 12px;">
                     <div>${r.dst}</div>
                     ${dstDomainSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.dport}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">
+                    <div>${r.dport}</div>
+                    ${dportAliasSub}
+                </td>
                 <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>
@@ -2411,7 +2548,7 @@ async function fetchAnomalousReport() {
     const limit = state.anomaliesPagination.limit;
     const offset = state.anomaliesPagination.offset;
     
-    let url = `/api/audit/matches?limit=${limit}&offset=${offset}`;
+    let url = `/api/audit/matches?limit=${limit}&offset=${offset}&sort_by=${state.auditSorting.by}&sort_order=${state.auditSorting.order}`;
     if (state.anomaliesFilters.src) url += `&src=${encodeURIComponent(state.anomaliesFilters.src)}`;
     if (state.anomaliesFilters.dst) url += `&dst=${encodeURIComponent(state.anomaliesFilters.dst)}`;
     if (state.anomaliesFilters.port) url += `&port=${encodeURIComponent(state.anomaliesFilters.port)}`;
@@ -2457,6 +2594,8 @@ function renderAnomalousReportTable(records) {
         
         const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
         const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
+        const sportAliasSub = r.sport_name ? `<div class="domain-subtext" title="${r.sport_name}">${r.sport_name}</div>` : '';
+        const dportAliasSub = r.dport_name ? `<div class="domain-subtext" title="${r.dport_name}">${r.dport_name}</div>` : '';
         
         return `
             <tr class="flow-row" onclick="showAnomaliesFlowDetails(${idx})">
@@ -2471,12 +2610,18 @@ function renderAnomalousReportTable(records) {
                     <div>${r.src}</div>
                     ${srcDomainSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.sport}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">
+                    <div>${r.sport}</div>
+                    ${sportAliasSub}
+                </td>
                 <td style="padding: 10px 12px;">
                     <div>${r.dst}</div>
                     ${dstDomainSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.dport}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">
+                    <div>${r.dport}</div>
+                    ${dportAliasSub}
+                </td>
                 <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>

@@ -451,18 +451,18 @@
                         <table class="data-table" id="anomalies-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
                             <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                 <tr>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間</th>
-                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain)</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain)</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定</th>
-                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包</th>
-                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小</th>
+                                    <th class="sortable sort-active" data-sort="match_ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
+                                    <th class="sortable" data-sort="ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="match_flag" style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="rule_ip" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="rule_port" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="src" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="sport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dst" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="proto" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="packets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="octets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
                                 </tr>
                             </thead>
                             <tbody id="anomalies-tbody">
@@ -803,18 +803,18 @@
                         <table class="data-table" id="audit-matches-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
                             <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                 <tr>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間</th>
-                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain)</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain)</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port</th>
-                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定</th>
-                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包</th>
-                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小</th>
+                                    <th class="sortable sort-active" data-sort="match_ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
+                                    <th class="sortable" data-sort="ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="match_flag" style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="rule_ip" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="rule_port" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="src" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="sport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dst" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="proto" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="packets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="octets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
                                     <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">操作</th>
                                 </tr>
                             </thead>
@@ -889,6 +889,61 @@
 
                 <h4 class="section-title">Raw JSON Payload (From Collector)</h4>
                 <pre class="code-block"><code id="detail-raw-json"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Trigger Modal -->
+    <div id="audit-trigger-modal" class="modal-overlay">
+        <div class="modal-container" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>流量比對盤查設定</h3>
+                <button class="btn-close" id="btn-close-trigger-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding-top: 15px; display: flex; flex-direction: column; gap: 18px;">
+                <div style="font-size: 0.88rem; color: var(--text-secondary);">
+                    請選擇本次流量比對盤查的開始時間範圍：
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Option A -->
+                    <label class="radio-label" style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                        <input type="radio" name="audit-range-option" value="last-run" checked style="margin-top: 3px;">
+                        <div>
+                            <div style="font-weight: 500; color: var(--text-primary);">自上次盤查時間開始</div>
+                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;" id="audit-option-last-run-label">
+                                上次時間: 載入中...
+                            </div>
+                        </div>
+                    </label>
+                    
+                    <!-- Option B -->
+                    <label class="radio-label" style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                        <input type="radio" name="audit-range-option" value="all-time" style="margin-top: 3px;">
+                        <div>
+                            <div style="font-weight: 500; color: var(--text-primary);">盤查既有的所有資料</div>
+                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                                從資料庫有記錄的最早時間點開始比對所有資料
+                            </div>
+                        </div>
+                    </label>
+                    
+                    <!-- Option C -->
+                    <label class="radio-label" style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                        <input type="radio" name="audit-range-option" value="custom" style="margin-top: 3px;">
+                        <div style="flex-grow: 1;">
+                            <div style="font-weight: 500; color: var(--text-primary); margin-bottom: 6px;">自訂開始時間</div>
+                            <input type="datetime-local" id="audit-custom-start-time" class="form-control select-dark select-sm" style="width: 100%; display: none;">
+                        </div>
+                    </label>
+                </div>
+                
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 10px;">
+                    <button class="btn btn-secondary" id="btn-cancel-trigger-audit" style="height: 38px; border-radius: 6px;">取消</button>
+                    <button class="btn btn-primary" id="btn-confirm-trigger-audit" style="height: 38px; border-radius: 6px;">開始盤查</button>
+                </div>
             </div>
         </div>
     </div>
