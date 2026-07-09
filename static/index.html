@@ -35,10 +35,33 @@
                     <i data-lucide="bar-chart-2"></i>
                     <span>Traffic Analytics</span>
                 </a>
-                <a href="#" class="nav-item" id="btn-tab-settings">
-                    <i data-lucide="database"></i>
-                    <span>Data Management</span>
+                <a href="#" class="nav-item" id="btn-tab-anomalies">
+                    <i data-lucide="alert-triangle"></i>
+                    <span>Anomalous Traffic Report</span>
                 </a>
+                
+                <!-- Collapsible Settings Menu -->
+                <div class="nav-item-collapsible" id="menu-settings" style="display: flex; flex-direction: column; width: 100%;">
+                    <a href="#" class="nav-item" id="btn-tab-settings-trigger" style="display: flex; align-items: center; width: 100%;">
+                        <i data-lucide="settings"></i>
+                        <span>Settings</span>
+                        <i data-lucide="chevron-down" class="chevron-icon" style="margin-left: auto; width: 14px; height: 14px; transition: transform 0.2s;"></i>
+                    </a>
+                    <div class="submenu" style="display: none; padding-left: 20px; flex-direction: column; gap: 4px; margin-top: 4px;">
+                        <a href="#" class="nav-item" id="btn-tab-management" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="database" style="width: 16px; height: 16px;"></i>
+                            <span>Data Management</span>
+                        </a>
+                        <a href="#" class="nav-item" id="btn-tab-aliases" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="tag" style="width: 16px; height: 16px;"></i>
+                            <span>Alias Manager</span>
+                        </a>
+                        <a href="#" class="nav-item" id="btn-tab-audit" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="shield-alert" style="width: 16px; height: 16px;"></i>
+                            <span>Traffic Auditing</span>
+                        </a>
+                    </div>
+                </div>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-indicator online">
@@ -367,36 +390,440 @@
                 </div>
             </section>
 
-            <!-- Settings / Data Management View -->
-            <section id="view-settings" class="dashboard-view">
-                <div class="card" style="max-width: 600px; margin: 40px auto 0 auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur);">
-                    <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; gap: 8px;">
-                        <i data-lucide="database" class="icon-sm" style="color: var(--color-danger);"></i>
-                        <h3 style="font-size: 1.1rem; font-weight: 600;">Manual Data Cleanup</h3>
+            <!-- Anomalous Traffic Report View -->
+            <section id="view-anomalies" class="dashboard-view" style="padding: 20px;">
+                <div class="card table-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                    <div class="card-header table-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                            <i data-lucide="alert-triangle" style="color: var(--color-danger); width: 20px; height: 20px;"></i>
+                            <span>異常流量報告 Anomalous Traffic Report</span>
+                        </h3>
+                        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                            <div class="page-size-selector" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem;">
+                                <label for="anomalies-page-size" style="color: var(--text-secondary);">顯示</label>
+                                <select id="anomalies-page-size" class="form-control select-sm" style="width: 70px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; color: var(--text-primary);">
+                                    <option value="25">25</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                    <option value="250">250</option>
+                                </select>
+                            </div>
+                            <button type="button" class="btn btn-primary" id="btn-export-anomalies" style="height: 34px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                <span>匯出 CSV</span>
+                            </button>
+                            <div style="font-size: 0.82rem; color: var(--text-muted);">
+                                共符合 <span id="anomalies-total-filtered" style="font-weight: 600; color: var(--text-primary);">0</span> 筆
+                            </div>
+                            <div class="pagination" id="anomalies-pagination" style="display: flex; gap: 4px;"></div>
+                        </div>
                     </div>
-                    <div class="card-body" style="padding: 24px;">
-                        <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
-                            Here you can manually delete flow logs that are older than a specific date. 
-                            This operation will run asynchronously in the background on the database level.
-                        </p>
-                        
-                        <div class="form-group" style="margin-bottom: 24px;">
-                            <label for="cleanup-before-date" style="display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; color: var(--text-primary);">
-                                Delete all data before:
-                            </label>
-                            <input type="datetime-local" id="cleanup-before-date" class="form-control select-dark" style="width: 100%; max-width: 320px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-sans);">
-                            <span class="text-muted" style="display: block; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);">
-                                Select a date and time. All IPFIX and NetFlow v9 records before this timestamp will be deleted.
-                            </span>
+                    
+                    <!-- Inline Search Filters -->
+                    <div style="padding: 16px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">來源 IP</label>
+                            <input type="text" id="filter-anomalies-src" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 192.168.1.1">
                         </div>
-                        
-                        <button class="btn btn-danger" id="btn-execute-cleanup">
-                            <i data-lucide="trash-2"></i>
-                            <span>Execute Cleanup</span>
-                        </button>
-                        
-                        <div id="cleanup-status-message" style="margin-top: 20px; padding: 14px 18px; border-radius: 8px; display: none; font-size: 0.88rem; line-height: 1.4;">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">目的 IP</label>
+                            <input type="text" id="filter-anomalies-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 8.8.8.8">
                         </div>
+                        <div class="form-group" style="flex: 1; min-width: 100px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">連接埠 (Port)</label>
+                            <input type="number" id="filter-anomalies-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">旗標 (Flag)</label>
+                            <select id="filter-anomalies-flag" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                                <option value="">所有旗標</option>
+                                <option value="watch">關注 (Watch)</option>
+                                <option value="anomaly">異常 (Anomaly)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" id="btn-apply-anomalies-search" class="btn btn-primary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">搜尋</button>
+                            <button type="button" id="btn-reset-anomalies-search" class="btn btn-secondary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">重設</button>
+                        </div>
+                    </div>
+
+                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="data-table" id="anomalies-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                            <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
+                                <tr>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間</th>
+                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain)</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain)</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定</th>
+                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包</th>
+                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小</th>
+                                </tr>
+                            </thead>
+                            <tbody id="anomalies-tbody">
+                                <tr>
+                                    <td colspan="12" class="text-center text-muted py-5" style="padding: 40px 0;">無任何報告資料。</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings - Data Management View -->
+            <section id="view-data-management" class="dashboard-view" style="padding: 20px;">
+                <div style="max-width: 100%; margin: 20px auto 0 auto;">
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="database" class="icon-sm" style="color: var(--color-danger);"></i>
+                            <h3 style="font-size: 1.1rem; font-weight: 600;">Manual Data Cleanup</h3>
+                        </div>
+                        <div class="card-body" style="padding: 24px;">
+                            <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
+                                Here you can manually delete flow logs that are older than a specific date. 
+                                This operation will run asynchronously in the background on the database level.
+                            </p>
+                            
+                            <div class="form-group" style="margin-bottom: 24px;">
+                                <label for="cleanup-before-date" style="display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; color: var(--text-primary);">
+                                    Delete all data before:
+                                </label>
+                                <input type="datetime-local" id="cleanup-before-date" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-sans);">
+                                <span class="text-muted" style="display: block; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);">
+                                    Select a date and time. All IPFIX and NetFlow v9 records before this timestamp will be deleted.
+                                </span>
+                            </div>
+                            
+                            <button class="btn btn-danger" id="btn-execute-cleanup">
+                                <i data-lucide="trash-2"></i>
+                                <span>Execute Cleanup</span>
+                            </button>
+                            
+                            <div id="cleanup-status-message" style="margin-top: 20px; padding: 14px 18px; border-radius: 8px; display: none; font-size: 0.88rem; line-height: 1.4;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings - Alias Manager View -->
+            <section id="view-alias-manager" class="dashboard-view" style="padding: 20px;">
+                <div style="max-width: 100%; margin: 20px auto 0 auto;">
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="tag" class="icon-sm" style="color: var(--color-primary);"></i>
+                                <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0;">Alias Manager</h3>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button type="button" id="btn-export-aliases" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
+                                    <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                    <span>Export Backup</span>
+                                </button>
+                                <button type="button" id="btn-import-aliases" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
+                                    <i data-lucide="upload" style="width: 14px; height: 14px;"></i>
+                                    <span>Import Backup</span>
+                                </button>
+                                <button type="button" id="btn-clear-aliases" class="btn btn-danger" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
+                                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                                    <span>Clear All</span>
+                                </button>
+                                <input type="file" id="input-import-aliases" accept=".json" style="display: none;">
+                            </div>
+                        </div>
+                        <div class="card-body" style="padding: 24px;">
+                            <!-- Segmented Control Button Group -->
+                            <div class="segmented-control" style="display: flex; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 3px; margin-bottom: 24px;">
+                                <button type="button" id="btn-toggle-ip" class="segmented-btn active" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">IP Aliases</button>
+                                <button type="button" id="btn-toggle-port" class="segmented-btn" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">Port Aliases</button>
+                            </div>
+
+                            <!-- IP Alias Mode Container -->
+                            <div id="container-ip-alias">
+                                <p class="text-muted" style="margin-bottom: 20px; font-size: 0.88rem; line-height: 1.5; color: var(--text-secondary);">
+                                    Map IP addresses to friendly labels (e.g. `192.168.10.12` -> `ClickHouse DB`). Mapped IPs display their aliases as subtexts in Flow Records. Unmapped IPs fall back to DNS lookup results.
+                                </p>
+                                
+                                <form id="form-ip-alias" style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px;">
+                                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                        <label for="input-alias-ip" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP Address</label>
+                                        <input type="text" id="input-alias-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. 192.168.1.1" required pattern="^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}$" title="Enter a valid IPv4 or IPv6 address">
+                                    </div>
+                                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                        <label for="input-alias-ip-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Alias Label</label>
+                                        <input type="text" id="input-alias-ip-name" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. Gateway" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">Save</button>
+                                </form>
+
+                                <div style="max-height: 230px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                                    <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                        <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
+                                            <tr>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP Address</th>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Alias Name</th>
+                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ip-aliases-tbody">
+                                            <!-- Populated via Javascript -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="ip-alias-status-message" style="margin-top: 15px; padding: 10px 14px; border-radius: 6px; display: none; font-size: 0.82rem;"></div>
+                            </div>
+
+                            <!-- Port Alias Mode Container -->
+                            <div id="container-port-alias" style="display: none;">
+                                <p class="text-muted" style="margin-bottom: 20px; font-size: 0.88rem; line-height: 1.5; color: var(--text-secondary);">
+                                    Map port numbers to friendly names. Named ports display aliases below port numbers in Flow Records.
+                                </p>
+
+                                <form id="form-port-alias" style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px;">
+                                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                        <label for="input-alias-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port</label>
+                                        <input type="number" id="input-alias-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. 80" required min="1" max="65535">
+                                    </div>
+                                    <div class="form-group" style="flex: 2; margin-bottom: 0;">
+                                        <label for="input-alias-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Alias Name</label>
+                                        <input type="text" id="input-alias-name" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. HTTP" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">Save</button>
+                                </form>
+
+                                <div style="max-height: 230px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                                    <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                        <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
+                                            <tr>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Port</th>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Name</th>
+                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="port-aliases-tbody">
+                                            <!-- Populated via Javascript -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="port-alias-status-message" style="margin-top: 15px; padding: 10px 14px; border-radius: 6px; display: none; font-size: 0.82rem;"></div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Traffic Auditing View -->
+            <section id="view-audit" class="dashboard-view" style="padding: 20px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                    
+                    <!-- Left: Audit Controls & Rules Management -->
+                    <div style="display: flex; flex-direction: column; gap: 24px;">
+                        
+                        <!-- Status and manual run panel -->
+                        <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                                <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--text-primary); margin: 0;">
+                                    <i data-lucide="shield-alert" style="color: var(--color-primary); width: 20px; height: 20px;"></i>
+                                    <span>流量盤查狀態</span>
+                                </h3>
+                                <button class="btn btn-primary" id="btn-trigger-audit" style="height: 38px; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+                                    <i data-lucide="play" style="width: 14px; height: 14px;"></i>
+                                    <span>立即盤查</span>
+                                </button>
+                            </div>
+                            <div style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 0.88rem;">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">上次盤查時間 (UTC+8):</span>
+                                    <span id="audit-last-run-time" style="font-family: var(--font-mono); color: var(--text-primary); font-weight: 500;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">下次盤查時間 (UTC+8):</span>
+                                    <span id="audit-next-run-time" style="font-family: var(--font-mono); color: var(--text-primary); font-weight: 500;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">上次盤查狀態:</span>
+                                    <span id="audit-last-run-status" class="badge" style="font-weight: 500;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">匹配流量筆數:</span>
+                                    <span id="audit-last-run-matches" style="color: var(--color-warning); font-weight: 600;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 4px;">
+                                    <span style="color: var(--text-secondary);">詳細訊息:</span>
+                                    <span id="audit-last-run-message" style="color: var(--text-muted); font-size: 0.8rem; word-break: break-all;">-</span>
+                                </div>
+                            </div>
+                            <div id="audit-trigger-status" style="margin-top: 15px; padding: 10px 14px; border-radius: 6px; display: none; font-size: 0.85rem;"></div>
+                        </div>
+
+                        <!-- Add Rule panel -->
+                        <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; color: var(--text-primary); margin: 0;">
+                                <i data-lucide="plus-circle" style="color: var(--color-success); width: 20px; height: 20px;"></i>
+                                <span>新增盤查規則</span>
+                            </h3>
+                            <form id="audit-rule-form" style="display: flex; flex-direction: column; gap: 16px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                    <div class="form-group" style="margin: 0;">
+                                        <label for="audit-input-ip" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP 或 CIDR (選填)</label>
+                                        <input type="text" id="audit-input-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="例: 192.168.10.12 或 /24">
+                                    </div>
+                                    <div class="form-group" style="margin: 0;">
+                                        <label for="audit-input-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port 或 範圍 (選填)</label>
+                                        <input type="text" id="audit-input-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="例: 80 或 80-443">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin: 0;">
+                                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">比對旗標 (必選)</label>
+                                    <div style="display: flex; gap: 20px; align-items: center; padding: 8px 0;">
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; color: var(--text-secondary); margin: 0;">
+                                            <input type="radio" name="audit-input-flag" value="watch" checked style="accent-color: var(--color-primary);"> 關注 (Watch)
+                                        </label>
+                                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; color: var(--text-secondary); margin: 0;">
+                                            <input type="radio" name="audit-input-flag" value="anomaly" style="accent-color: var(--color-danger);"> 異常 (Anomaly)
+                                        </label>
+                                    </div>
+                                </div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
+                                    * 提示：IP 與 Port 可單填一項，若兩者皆填則需同時符合 (AND)。不得建立完全重複的規則。
+                                </span>
+                                <button type="submit" class="btn btn-primary" style="height: 38px; border-radius: 6px; font-weight: 500;">儲存規則</button>
+                            </form>
+                            <div id="audit-rule-status-message" style="margin-top: 15px; padding: 10px 14px; border-radius: 6px; display: none; font-size: 0.82rem;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Audit Rules List -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 24px; display: flex; flex-direction: column;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--text-primary); margin: 0;">
+                                <i data-lucide="list" style="color: var(--color-info); width: 20px; height: 20px;"></i>
+                                <span>盤查規則清單</span>
+                            </h3>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button class="btn btn-secondary btn-sm" id="btn-export-rules" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; display: flex; align-items: center; gap: 4px;">
+                                    <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                    <span>匯出備份</span>
+                                </button>
+                                <button class="btn btn-secondary btn-sm" id="btn-import-rules" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; display: flex; align-items: center; gap: 4px;">
+                                    <i data-lucide="upload" style="width: 14px; height: 14px;"></i>
+                                    <span>匯入備份</span>
+                                </button>
+                                <input type="file" id="input-import-rules" accept="application/json" style="display: none;">
+                            </div>
+                        </div>
+                        <div style="flex-grow: 1; min-height: 300px; max-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                            <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
+                                    <tr>
+                                        <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP / CIDR</th>
+                                        <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Port / 範圍</th>
+                                        <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">標記</th>
+                                        <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="audit-rules-tbody">
+                                    <!-- Populated via JS -->
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-5" style="padding: 40px 0;">載入中...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom: Audit Matches Log Table -->
+                <div class="card table-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column;">
+                    <div class="card-header table-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                            <i data-lucide="alert-triangle" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
+                            <span>異常流量報告 Anomalous Traffic Report</span>
+                        </h3>
+                        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                            <div class="page-size-selector" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem;">
+                                <label for="audit-page-size" style="color: var(--text-secondary);">顯示</label>
+                                <select id="audit-page-size" class="form-control select-sm" style="width: 70px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; color: var(--text-primary);">
+                                    <option value="25">25</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                    <option value="250">250</option>
+                                </select>
+                            </div>
+                            <button type="button" class="btn btn-primary" id="btn-export-audit-matches" style="height: 34px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+                                <span>匯出 CSV</span>
+                            </button>
+                            <button type="button" class="btn btn-danger" id="btn-clear-audit-matches" style="height: 34px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                                <span>清除所有報告</span>
+                            </button>
+                            <div style="font-size: 0.82rem; color: var(--text-muted);">
+                                共符合 <span id="audit-total-filtered" style="font-weight: 600; color: var(--text-primary);">0</span> 筆
+                            </div>
+                            <div class="pagination" id="audit-pagination" style="display: flex; gap: 4px;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Inline Search Filters -->
+                    <div style="padding: 16px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">來源 IP</label>
+                            <input type="text" id="filter-audit-src" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 192.168.1.1">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">目的 IP</label>
+                            <input type="text" id="filter-audit-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 8.8.8.8">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 100px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">連接埠 (Port)</label>
+                            <input type="number" id="filter-audit-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">旗標 (Flag)</label>
+                            <select id="filter-audit-flag" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                                <option value="">所有旗標</option>
+                                <option value="watch">關注 (Watch)</option>
+                                <option value="anomaly">異常 (Anomaly)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" id="btn-apply-audit-search" class="btn btn-primary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">搜尋</button>
+                            <button type="button" id="btn-reset-audit-search" class="btn btn-secondary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">重設</button>
+                        </div>
+                    </div>
+
+                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="data-table" id="audit-matches-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                            <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
+                                <tr>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間</th>
+                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain)</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain)</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port</th>
+                                    <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定</th>
+                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包</th>
+                                    <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小</th>
+                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-matches-tbody">
+                                <tr>
+                                    <td colspan="12" class="text-center text-muted py-5" style="padding: 40px 0;">無任何存檔資料。</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>

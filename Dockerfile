@@ -12,7 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code and UI assets
 COPY flow_collector.py .
-COPY dumpredistosqllite.py .
 COPY web_ui.py .
 COPY static/ ./static/
 

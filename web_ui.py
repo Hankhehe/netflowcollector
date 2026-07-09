@@ -4,12 +4,15 @@ import json
 import socket
 import threading
 import clickhouse_connect
+import ipaddress
+import time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 app = FastAPI(title="Netflow Collector Web UI")
 
@@ -175,6 +178,33 @@ def get_db_connection():
     
     return conn
 
+port_aliases_cache = {}
+ip_aliases_cache = {}
+
+def load_port_aliases():
+    global port_aliases_cache
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT port, name FROM port_aliases")
+        port_aliases_cache = {row[0]: row[1] for row in cur.fetchall()}
+        conn.close()
+        print(f"[Startup Init] Loaded {len(port_aliases_cache)} port aliases into cache.")
+    except Exception as e:
+        print(f"[Startup Init] Error loading port aliases into cache: {e}")
+
+def load_ip_aliases():
+    global ip_aliases_cache
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT ip, name FROM ip_aliases")
+        ip_aliases_cache = {row[0]: row[1] for row in cur.fetchall()}
+        conn.close()
+        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} IP aliases into cache.")
+    except Exception as e:
+        print(f"[Startup Init] Error loading IP aliases into cache: {e}")
+
 def init_db():
     """Verify that tables exist, run auto-migration for missing columns, and create indexes on startup."""
     try:
@@ -189,11 +219,78 @@ def init_db():
         
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dns_cache_ip ON dns_cache (ip)")
         
+        # Initialize port aliases table
+        cur.execute("""CREATE TABLE IF NOT EXISTS port_aliases (
+            port INTEGER PRIMARY KEY,
+            name TEXT NOT NULL
+        )""")
+        
+        # Check if table is empty to pre-populate defaults
+        cur.execute("SELECT COUNT(*) FROM port_aliases")
+        if cur.fetchone()[0] == 0:
+            defaults = [
+                (20, "FTP-Data"),
+                (21, "FTP"),
+                (22, "SSH"),
+                (23, "Telnet"),
+                (25, "SMTP"),
+                (53, "DNS"),
+                (67, "DHCP-Server"),
+                (68, "DHCP-Client"),
+                (80, "HTTP"),
+                (110, "POP3"),
+                (123, "NTP"),
+                (143, "IMAP"),
+                (161, "SNMP"),
+                (443, "HTTPS"),
+                (445, "Microsoft-DS"),
+                (993, "IMAPS"),
+                (995, "POP3S"),
+                (1433, "MSSQL"),
+                (2055, "Netflow"),
+                (3306, "MySQL"),
+                (3389, "RDP"),
+                (4739, "IPFIX"),
+                (5432, "PostgreSQL"),
+                (8080, "HTTP-ALT")
+            ]
+            cur.executemany("INSERT INTO port_aliases (port, name) VALUES (?, ?)", defaults)
+            conn.commit()
+            print("[Startup Init] SQLite default port aliases pre-populated.")
+            
+        # Initialize ip aliases table
+        cur.execute("""CREATE TABLE IF NOT EXISTS ip_aliases (
+            ip TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        )""")
+        
+        # Initialize audit rules table
+        cur.execute("""CREATE TABLE IF NOT EXISTS audit_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT,
+            port TEXT,
+            flag TEXT CHECK(flag IN ('watch', 'anomaly')),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ip, port)
+        )""")
+        
+        # Initialize audit logs table
+        cur.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+            status TEXT,
+            records_matched INTEGER DEFAULT 0,
+            message TEXT
+        )""")
+        
         conn.commit()
         conn.close()
-        print("[Startup Init] SQLite DNS cache initialized successfully.")
+        print("[Startup Init] SQLite DNS cache, port, IP aliases, and audit tables initialized successfully.")
+        
+        load_port_aliases()
+        load_ip_aliases()
     except Exception as e:
-        print(f"[Startup Init] Error initializing SQLite DNS cache: {e}")
+        print(f"[Startup Init] Error initializing SQLite tables: {e}")
 
     # Initialize ClickHouse tables if they do not exist
     try:
@@ -236,6 +333,29 @@ def init_db():
         TTL ts + INTERVAL 7 DAY
         """)
         
+        # Initialize matched_flows table (without TTL)
+        client.command("""
+        CREATE TABLE IF NOT EXISTS matched_flows (
+            id String,
+            exporter String,
+            proto String,
+            src String,
+            dst String,
+            sport UInt16,
+            dport UInt16,
+            packets UInt64,
+            octets UInt64,
+            protocol Nullable(UInt16),
+            json_data String,
+            ts DateTime,
+            rule_ip Nullable(String),
+            rule_port Nullable(String),
+            match_flag String,
+            match_ts DateTime DEFAULT now()
+        ) ENGINE = MergeTree()
+        ORDER BY (match_ts, ts, exporter, src, dst)
+        """)
+        
         # Ensure TTL is applied to existing tables if they were created without it
         try:
             client.command("ALTER TABLE ipfix MODIFY TTL ts + INTERVAL 7 DAY")
@@ -243,13 +363,16 @@ def init_db():
         except Exception as alter_err:
             print(f"[Startup Init] Warning altering ClickHouse TTL: {alter_err}")
             
-        print("[Startup Init] ClickHouse database tables initialized successfully with 7-day TTL.")
+        print("[Startup Init] ClickHouse database tables initialized successfully.")
     except Exception as e:
         print(f"[Startup Init] Error initializing ClickHouse tables: {e}")
 
 @app.on_event("startup")
 def on_startup():
     init_db()
+    # Start background daily traffic audit scheduler
+    t = threading.Thread(target=audit_scheduler_loop, daemon=True)
+    t.start()
 
 @app.get("/api/exporters")
 def get_exporters():
@@ -506,6 +629,11 @@ def get_flows(
                 r["proto_name"] = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})")
             else:
                 r["proto_name"] = "N/A"
+                
+            # Attaching port names from cache
+            r["sport_name"] = port_aliases_cache.get(r.get("sport"), "")
+            r["dport_name"] = port_aliases_cache.get(r.get("dport"), "")
+            
             records.append(r)
 
         # Collect unique IPs to resolve
@@ -519,10 +647,12 @@ def get_flows(
         # Get DNS mappings
         dns_map = get_dns_mappings(ips_to_resolve)
         
-        # Attach domains to records
+        # Attach domains to records (IP alias takes priority over DNS cache resolved domain)
         for r in records:
-            r["src_domain"] = dns_map.get(r.get("src"), "")
-            r["dst_domain"] = dns_map.get(r.get("dst"), "")
+            src_ip = r.get("src")
+            dst_ip = r.get("dst")
+            r["src_domain"] = ip_aliases_cache.get(src_ip, dns_map.get(src_ip, ""))
+            r["dst_domain"] = ip_aliases_cache.get(dst_ip, dns_map.get(dst_ip, ""))
 
         return {
             "total": total_count,
@@ -771,6 +901,10 @@ def export_flows(
                 csv_headers.append("Source Domain")
             if "dst" in header:
                 csv_headers.append("Destination Domain")
+            if "sport" in header:
+                csv_headers.append("Source Port Name")
+            if "dport" in header:
+                csv_headers.append("Destination Port Name")
             csv_headers.append("Protocol Name")
 
             writer.writerow(csv_headers)
@@ -796,11 +930,17 @@ def export_flows(
                         val = ""
                     csv_row.append(str(val))
                 
-                # Add domain names
+                # Add domain names (IP alias takes priority over DNS cache resolved domain)
                 if "src" in r:
-                    csv_row.append(dns_map.get(r["src"], ""))
+                    csv_row.append(ip_aliases_cache.get(r["src"], dns_map.get(r["src"], "")))
                 if "dst" in r:
-                    csv_row.append(dns_map.get(r["dst"], ""))
+                    csv_row.append(ip_aliases_cache.get(r["dst"], dns_map.get(r["dst"], "")))
+                
+                # Add port names
+                if "sport" in r:
+                    csv_row.append(port_aliases_cache.get(r["sport"], ""))
+                if "dport" in r:
+                    csv_row.append(port_aliases_cache.get(r["dport"], ""))
                 
                 # Add protocol friendly name
                 if "protocol" in r and r["protocol"] is not None:
@@ -1110,6 +1250,871 @@ def delete_flows_before(before: str = Query(..., description="Delete data before
         client.command("ALTER TABLE netflow9 DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
         
         return {"status": "success", "message": f"Successfully queued deletion mutation in ClickHouse for records older than {cutoff_str}."}
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ports/aliases")
+def get_port_aliases():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT port, name FROM port_aliases ORDER BY port ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"port": r["port"], "name": r["name"]} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ports/aliases")
+def set_port_alias(port: int, name: str):
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO port_aliases (port, name) VALUES (?, ?)", (port, name))
+        conn.commit()
+        conn.close()
+        load_port_aliases() # Refresh cache
+        return {"status": "success", "message": f"Port {port} named as {name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/ports/aliases/{port}")
+def delete_port_alias(port: int):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM port_aliases WHERE port = ?", (port,))
+        conn.commit()
+        conn.close()
+        load_port_aliases() # Refresh cache
+        return {"status": "success", "message": f"Deleted alias for port {port}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ips/aliases")
+def get_ip_aliases():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT ip, name FROM ip_aliases ORDER BY ip ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"ip": r["ip"], "name": r["name"]} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ips/aliases")
+def set_ip_alias(ip: str, name: str):
+    ip = ip.strip()
+    name = name.strip()
+    if not ip or not name:
+        raise HTTPException(status_code=400, detail="IP and Name cannot be empty")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name) VALUES (?, ?)", (ip, name))
+        conn.commit()
+        conn.close()
+        load_ip_aliases() # Refresh cache
+        return {"status": "success", "message": f"IP {ip} named as {name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/ips/aliases/{ip}")
+def delete_ip_alias(ip: str):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ip_aliases WHERE ip = ?", (ip,))
+        conn.commit()
+        conn.close()
+        load_ip_aliases() # Refresh cache
+        return {"status": "success", "message": f"Deleted alias for IP {ip}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/aliases/export")
+def export_aliases():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get IP aliases
+        cur.execute("SELECT ip, name FROM ip_aliases ORDER BY ip ASC")
+        ip_rows = cur.fetchall()
+        ips = [{"ip": r["ip"], "name": r["name"]} for r in ip_rows]
+        
+        # Get Port aliases
+        cur.execute("SELECT port, name FROM port_aliases ORDER BY port ASC")
+        port_rows = cur.fetchall()
+        ports = [{"port": r["port"], "name": r["name"]} for r in port_rows]
+        
+        conn.close()
+        return {
+            "ip_aliases": ips,
+            "port_aliases": ports
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/aliases/import")
+def import_aliases(payload: Dict[str, Any]):
+    ip_aliases = payload.get("ip_aliases", [])
+    port_aliases = payload.get("port_aliases", [])
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        imported_ips = 0
+        imported_ports = 0
+        
+        # Insert IP aliases
+        for item in ip_aliases:
+            if not isinstance(item, dict):
+                continue
+            ip = item.get("ip")
+            name = item.get("name")
+            if not ip or not name:
+                continue
+            ip = str(ip).strip()
+            name = str(name).strip()
+            if ip and name:
+                cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name) VALUES (?, ?)", (ip, name))
+                imported_ips += 1
+                
+        # Insert Port aliases
+        for item in port_aliases:
+            if not isinstance(item, dict):
+                continue
+            port = item.get("port")
+            name = item.get("name")
+            if port is None or not name:
+                continue
+            try:
+                port_val = int(port)
+                if port_val < 1 or port_val > 65535:
+                    continue
+            except ValueError:
+                continue
+            name = str(name).strip()
+            if name:
+                cur.execute("INSERT OR REPLACE INTO port_aliases (port, name) VALUES (?, ?)", (port_val, name))
+                imported_ports += 1
+                
+        conn.commit()
+        conn.close()
+        
+        # Refresh in-memory caches
+        load_ip_aliases()
+        load_port_aliases()
+        
+        return {
+            "status": "success",
+            "message": f"Successfully imported {imported_ips} IP aliases and {imported_ports} Port aliases (overwrote duplicate keys)."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/aliases/clear")
+def clear_all_aliases():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ip_aliases")
+        cur.execute("DELETE FROM port_aliases")
+        conn.commit()
+        conn.close()
+        
+        # Refresh in-memory caches
+        load_ip_aliases()
+        load_port_aliases()
+        
+        return {
+            "status": "success",
+            "message": "All custom IP and Port aliases cleared successfully."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Helper validation functions for Audit System
+def validate_ip_or_cidr(ip_str: str) -> bool:
+    if not ip_str:
+        return True
+    try:
+        ipaddress.ip_address(ip_str)
+        return True
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(ip_str, strict=False)
+        return True
+    except ValueError:
+        pass
+    return False
+
+def validate_port_or_range(port_str: str) -> bool:
+    if not port_str:
+        return True
+    if '-' in port_str:
+        parts = port_str.split('-')
+        if len(parts) != 2:
+            return False
+        try:
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+            return 0 <= start <= 65535 and 0 <= end <= 65535 and start <= end
+        except ValueError:
+            return False
+    else:
+        try:
+            val = int(port_str.strip())
+            return 0 <= val <= 65535
+        except ValueError:
+            return False
+
+def parse_rule_criteria(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    parsed = []
+    for r in rules:
+        rule_obj = {
+            "id": r["id"],
+            "ip_raw": r["ip"],
+            "port_raw": r["port"],
+            "flag": r["flag"],
+            "ip_obj": None,
+            "port_obj": None
+        }
+        if r["ip"]:
+            try:
+                if '/' in r["ip"]:
+                    rule_obj["ip_obj"] = ipaddress.ip_network(r["ip"], strict=False)
+                else:
+                    rule_obj["ip_obj"] = ipaddress.ip_address(r["ip"])
+            except Exception:
+                pass
+        if r["port"]:
+            if '-' in r["port"]:
+                parts = r["port"].split('-')
+                rule_obj["port_obj"] = (int(parts[0]), int(parts[1]))
+            else:
+                rule_obj["port_obj"] = int(r["port"])
+        parsed.append(rule_obj)
+    return parsed
+
+def check_flow_match(flow: Dict[str, Any], parsed_rules: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    flow_src_ip = None
+    flow_dst_ip = None
+    try:
+        flow_src_ip = ipaddress.ip_address(flow.get("src", ""))
+    except Exception:
+        pass
+    try:
+        flow_dst_ip = ipaddress.ip_address(flow.get("dst", ""))
+    except Exception:
+        pass
+        
+    flow_sport = flow.get("sport")
+    flow_dport = flow.get("dport")
+    
+    for rule in parsed_rules:
+        ip_matched = True
+        port_matched = True
+        
+        # IP match
+        if rule["ip_obj"]:
+            ip_matched = False
+            # Check src IP
+            if flow_src_ip:
+                if isinstance(rule["ip_obj"], (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+                    if flow_src_ip == rule["ip_obj"]:
+                        ip_matched = True
+                else: # Network
+                    if flow_src_ip in rule["ip_obj"]:
+                        ip_matched = True
+            # Check dst IP
+            if not ip_matched and flow_dst_ip:
+                if isinstance(rule["ip_obj"], (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+                    if flow_dst_ip == rule["ip_obj"]:
+                        ip_matched = True
+                else: # Network
+                    if flow_dst_ip in rule["ip_obj"]:
+                        ip_matched = True
+                        
+        # Port match
+        if rule["port_obj"]:
+            port_matched = False
+            # Check sport
+            if flow_sport is not None:
+                if isinstance(rule["port_obj"], tuple):
+                    if rule["port_obj"][0] <= flow_sport <= rule["port_obj"][1]:
+                        port_matched = True
+                else:
+                    if flow_sport == rule["port_obj"]:
+                        port_matched = True
+            # Check dport
+            if not port_matched and flow_dport is not None:
+                if isinstance(rule["port_obj"], tuple):
+                    if rule["port_obj"][0] <= flow_dport <= rule["port_obj"][1]:
+                        port_matched = True
+                else:
+                    if flow_dport == rule["port_obj"]:
+                        port_matched = True
+                        
+        if ip_matched and port_matched:
+            return rule
+            
+    return None
+
+def run_traffic_audit() -> Dict[str, Any]:
+    print("[Audit] Starting traffic audit...", flush=True)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, ip, port, flag FROM audit_rules")
+        rules = [dict(row) for row in cur.fetchall()]
+        
+        if not rules:
+            cur.execute("INSERT INTO audit_logs (status, records_matched, message) VALUES (?, ?, ?)", 
+                        ("success", 0, "No audit rules configured. Skip matching."))
+            conn.commit()
+            conn.close()
+            return {"status": "success", "records_matched": 0, "message": "No audit rules configured."}
+            
+        parsed_rules = parse_rule_criteria(rules)
+        
+        cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+        
+        if row:
+            last_run_str = row["run_ts"]
+            try:
+                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                last_run_dt = datetime.utcnow() - timedelta(days=7)
+        else:
+            last_run_dt = datetime.utcnow() - timedelta(days=7)
+            
+        current_run_dt = datetime.utcnow()
+        last_run_str = last_run_dt.strftime("%Y-%m-%d %H:%M:%S")
+        current_run_str = current_run_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
+        print(f"[Audit] Audit range: {last_run_str} to {current_run_str} (UTC)", flush=True)
+        
+        client = get_ch_client()
+        tables = ["ipfix", "netflow9"]
+        all_matched_records = []
+        
+        for table in tables:
+            query = f"""
+                SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts
+                FROM {table}
+                WHERE ts >= %(start)s AND ts < %(end)s
+            """
+            result = client.query(query, parameters={"start": last_run_str, "end": current_run_str})
+            column_names = result.column_names
+            rows = result.result_rows
+            
+            for row_vals in rows:
+                flow = dict(zip(column_names, row_vals))
+                matching_rule = check_flow_match(flow, parsed_rules)
+                if matching_rule:
+                    flow["rule_ip"] = matching_rule["ip_raw"]
+                    flow["rule_port"] = matching_rule["port_raw"]
+                    flow["match_flag"] = matching_rule["flag"]
+                    flow["match_ts"] = current_run_dt
+                    all_matched_records.append(flow)
+                    
+        if all_matched_records:
+            insert_data = []
+            for r in all_matched_records:
+                insert_data.append([
+                    r["id"],
+                    r["exporter"],
+                    r["proto"],
+                    r["src"],
+                    r["dst"],
+                    r.get("sport", 0),
+                    r.get("dport", 0),
+                    r.get("packets", 0),
+                    r.get("octets", 0),
+                    r.get("protocol"),
+                    r["json_data"],
+                    r["ts"],
+                    r["rule_ip"],
+                    r["rule_port"],
+                    r["match_flag"],
+                    r["match_ts"]
+                ])
+                
+            client.insert("matched_flows", insert_data, column_names=[
+                "id", "exporter", "proto", "src", "dst", "sport", "dport", "packets", "octets", "protocol", "json_data", "ts", "rule_ip", "rule_port", "match_flag", "match_ts"
+            ])
+            
+        cur.execute("INSERT INTO audit_logs (run_ts, status, records_matched, message) VALUES (?, ?, ?, ?)",
+                    (current_run_str, "success", len(all_matched_records), f"Audit completed. Found {len(all_matched_records)} matches."))
+        conn.commit()
+        conn.close()
+        
+        print(f"[Audit] Audit success. Matched and saved {len(all_matched_records)} records.", flush=True)
+        return {"status": "success", "records_matched": len(all_matched_records), "message": f"Audit completed. {len(all_matched_records)} records matched."}
+        
+    except Exception as e:
+        print(f"[Audit] Audit failed: {e}", flush=True)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            cur.execute("INSERT INTO audit_logs (status, records_matched, message) VALUES (?, ?, ?)",
+                        ("failed", 0, str(e)))
+            conn.commit()
+            conn.close()
+        except Exception as sqlite_err:
+            print(f"[Audit] Failed to log failure in SQLite: {sqlite_err}", flush=True)
+        return {"status": "failed", "records_matched": 0, "message": str(e)}
+
+def audit_scheduler_loop():
+    print("[Audit] Background daily scheduler thread started.", flush=True)
+    try:
+        time.sleep(30)
+    except Exception:
+        pass
+        
+    while True:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            conn.close()
+            
+            should_run = False
+            if row:
+                last_run_str = row[0]
+                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
+                if datetime.utcnow() - last_run_dt >= timedelta(hours=24):
+                    should_run = True
+            else:
+                should_run = True
+                
+            if should_run:
+                run_traffic_audit()
+        except Exception as sched_err:
+            print(f"[Audit] Scheduler loop error: {sched_err}", flush=True)
+            
+        time.sleep(3600)
+
+class AuditRuleCreate(BaseModel):
+    ip: Optional[str] = None
+    port: Optional[str] = None
+    flag: str
+
+@app.get("/api/audit/rules")
+def get_audit_rules():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, ip, port, flag, created_at FROM audit_rules ORDER BY id DESC")
+        rules = [dict(row) for row in cur.fetchall()]
+        conn.close()
+        return rules
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/audit/rules/export")
+def export_audit_rules():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT ip, port, flag FROM audit_rules ORDER BY id ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"ip": r["ip"], "port": r["port"], "flag": r["flag"]} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/audit/rules/import")
+def import_audit_rules(payload: List[Dict[str, Any]]):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        imported = 0
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            ip = item.get("ip")
+            port = item.get("port")
+            flag = item.get("flag")
+            
+            # Basic validation
+            if flag not in ("watch", "anomaly"):
+                continue
+                
+            ip_val = str(ip).strip() if ip is not None else None
+            port_val = str(port).strip() if port is not None else None
+            
+            if not ip_val and not port_val:
+                continue
+                
+            cur.execute("""
+                INSERT OR REPLACE INTO audit_rules (ip, port, flag)
+                VALUES (?, ?, ?)
+            """, (ip_val, port_val, flag))
+            imported += 1
+            
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": f"Successfully imported {imported} audit rules."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/audit/rules")
+def create_audit_rule(rule: AuditRuleCreate):
+    ip_val = rule.ip.strip() if rule.ip else None
+    port_val = rule.port.strip() if rule.port else None
+    flag_val = rule.flag.strip().lower()
+    
+    if flag_val not in ("watch", "anomaly"):
+        raise HTTPException(status_code=400, detail="Flag must be 'watch' or 'anomaly'")
+        
+    if not ip_val and not port_val:
+        raise HTTPException(status_code=400, detail="At least one of IP or Port must be provided.")
+        
+    if ip_val and not validate_ip_or_cidr(ip_val):
+        raise HTTPException(status_code=400, detail="Invalid IP or CIDR address format.")
+        
+    if port_val and not validate_port_or_range(port_val):
+        raise HTTPException(status_code=400, detail="Invalid Port or Port range format. Use e.g. '80' or '80-443'")
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM audit_rules WHERE (ip IS ? OR ip = ?) AND (port IS ? OR port = ?)", 
+                    (ip_val, ip_val, port_val, port_val))
+        if cur.fetchone():
+            conn.close()
+            raise HTTPException(status_code=400, detail="Rule already exists.")
+            
+        cur.execute("INSERT INTO audit_rules (ip, port, flag) VALUES (?, ?, ?)", (ip_val, port_val, flag_val))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Audit rule created successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/audit/rules/{rule_id}")
+def delete_audit_rule(rule_id: int):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM audit_rules WHERE id = ?", (rule_id,))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Audit rule deleted successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/audit/run")
+def trigger_audit():
+    result = run_traffic_audit()
+    if result["status"] == "success":
+        return result
+    else:
+        raise HTTPException(status_code=500, detail=result["message"])
+
+@app.get("/api/audit/status")
+def get_audit_status():
+    def to_utc8_str(utc_dt_str: str) -> str:
+        if not utc_dt_str or utc_dt_str == "Never":
+            return "Never"
+        try:
+            utc_dt_str = utc_dt_str.replace('T', ' ')
+            dt = datetime.strptime(utc_dt_str, "%Y-%m-%d %H:%M:%S")
+            utc8_dt = dt + timedelta(hours=8)
+            return utc8_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return utc_dt_str
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get last run log (success or failed)
+        cur.execute("SELECT run_ts, status, records_matched, message FROM audit_logs ORDER BY id DESC LIMIT 1")
+        last_log = cur.fetchone()
+        
+        # Get last success run to calculate next run
+        cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
+        last_success = cur.fetchone()
+        
+        conn.close()
+        
+        last_run_utc8 = "Never"
+        next_run_utc8 = "Immediately"
+        status = "none"
+        records_matched = 0
+        message = "No audit has run yet."
+        
+        if last_log:
+            last_run_utc8 = to_utc8_str(last_log["run_ts"])
+            status = last_log["status"]
+            records_matched = last_log["records_matched"]
+            message = last_log["message"]
+            
+        if last_success:
+            utc_str = last_success["run_ts"].replace('T', ' ')
+            dt = datetime.strptime(utc_str, "%Y-%m-%d %H:%M:%S")
+            next_dt = dt + timedelta(hours=24)
+            next_run_utc8 = to_utc8_str(next_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            
+        return {
+            "run_ts": last_run_utc8,
+            "next_run_ts": next_run_utc8,
+            "status": status,
+            "records_matched": records_matched,
+            "message": message
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/audit/matches")
+def get_audit_matches(
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    src: Optional[str] = Query(None),
+    dst: Optional[str] = Query(None),
+    sport: Optional[int] = Query(None),
+    dport: Optional[int] = Query(None),
+    port: Optional[int] = Query(None),
+    flag: Optional[str] = Query(None)
+):
+    try:
+        client = get_ch_client()
+        where_clauses = []
+        params = {}
+        
+        if src:
+            where_clauses.append("src LIKE %(src)s")
+            params["src"] = f"{src}%"
+        if dst:
+            where_clauses.append("dst LIKE %(dst)s")
+            params["dst"] = f"{dst}%"
+        if sport is not None:
+            where_clauses.append("sport = %(sport)s")
+            params["sport"] = sport
+        if dport is not None:
+            where_clauses.append("dport = %(dport)s")
+            params["dport"] = dport
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
+        if flag:
+            where_clauses.append("match_flag = %(flag)s")
+            params["flag"] = flag.strip().lower()
+            
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+            
+        count_query = f"SELECT count() FROM matched_flows {where_sql}"
+        count_result = client.query(count_query, parameters=params)
+        total_records = count_result.result_rows[0][0]
+        
+        query = f"""
+            SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts, rule_ip, rule_port, match_flag, match_ts
+            FROM matched_flows
+            {where_sql}
+            ORDER BY match_ts DESC, ts DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """
+        params["limit"] = limit
+        params["offset"] = offset
+        
+        data_result = client.query(query, parameters=params)
+        column_names = data_result.column_names
+        records = []
+        ips_to_resolve = set()
+        
+        for row_vals in data_result.result_rows:
+            r = dict(zip(column_names, row_vals))
+            if isinstance(r["ts"], datetime):
+                r["ts"] = r["ts"].strftime("%Y-%m-%d %H:%M:%S")
+            if isinstance(r["match_ts"], datetime):
+                r["match_ts"] = r["match_ts"].strftime("%Y-%m-%d %H:%M:%S")
+            records.append(r)
+            if r.get("src"):
+                ips_to_resolve.add(r["src"])
+            if r.get("dst"):
+                ips_to_resolve.add(r["dst"])
+                
+        dns_map = get_dns_mappings(ips_to_resolve)
+        for r in records:
+            r["src_domain"] = dns_map.get(r.get("src"), "")
+            r["dst_domain"] = dns_map.get(r.get("dst"), "")
+            
+        return {
+            "total": total_records,
+            "limit": limit,
+            "offset": offset,
+            "records": records
+        }
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/audit/matches")
+def clear_audit_matches():
+    try:
+        client = get_ch_client()
+        client.command("TRUNCATE TABLE matched_flows")
+        return {"status": "success", "message": "Permanently matched records cleared."}
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/audit/matches/{match_id}")
+def delete_single_audit_match(match_id: str):
+    try:
+        client = get_ch_client()
+        client.command("ALTER TABLE matched_flows DELETE WHERE id = %(id)s", parameters={"id": match_id})
+        return {"status": "success", "message": f"Match record {match_id} deleted."}
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/audit/matches/export")
+def export_audit_matches(
+    src: Optional[str] = Query(None),
+    dst: Optional[str] = Query(None),
+    sport: Optional[int] = Query(None),
+    dport: Optional[int] = Query(None),
+    port: Optional[int] = Query(None),
+    flag: Optional[str] = Query(None)
+):
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse
+    
+    try:
+        client = get_ch_client()
+        where_clauses = []
+        params = {}
+        
+        if src:
+            where_clauses.append("src LIKE %(src)s")
+            params["src"] = f"{src}%"
+        if dst:
+            where_clauses.append("dst LIKE %(dst)s")
+            params["dst"] = f"{dst}%"
+        if sport is not None:
+            where_clauses.append("sport = %(sport)s")
+            params["sport"] = sport
+        if dport is not None:
+            where_clauses.append("dport = %(dport)s")
+            params["dport"] = dport
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
+        if flag:
+            where_clauses.append("match_flag = %(flag)s")
+            params["flag"] = flag.strip().lower()
+            
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+            
+        query = f"""
+            SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, ts, rule_ip, rule_port, match_flag, match_ts
+            FROM matched_flows
+            {where_sql}
+            ORDER BY match_ts DESC, ts DESC
+            LIMIT 100000
+        """
+        
+        data_result = client.query(query, parameters=params)
+        column_names = data_result.column_names
+        
+        # Collect unique IPs to resolve domains from DNS cache
+        ips_to_resolve = set()
+        for row in data_result.result_rows:
+            r = dict(zip(column_names, row))
+            if r.get("src"):
+                ips_to_resolve.add(r["src"])
+            if r.get("dst"):
+                ips_to_resolve.add(r["dst"])
+        dns_map = get_dns_mappings(ips_to_resolve)
+        
+        # CSV generator
+        def csv_generator():
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # CSV Headers
+            headers = [
+                "Audit Time", "Flow Time", "Flag", "Matched IP Rule", "Matched Port Rule",
+                "Source IP", "Source Domain", "Source Port", "Source Port Name",
+                "Destination IP", "Destination Domain", "Destination Port", "Destination Port Name",
+                "Protocol", "Packets", "Bytes"
+            ]
+            writer.writerow(headers)
+            yield output.getvalue()
+            output.seek(0)
+            output.truncate(0)
+            
+            for row_vals in data_result.result_rows:
+                r = dict(zip(column_names, row_vals))
+                
+                # Format dates
+                m_ts = r["match_ts"].strftime("%Y-%m-%d %H:%M:%S") if isinstance(r["match_ts"], datetime) else str(r["match_ts"])
+                f_ts = r["ts"].strftime("%Y-%m-%d %H:%M:%S") if isinstance(r["ts"], datetime) else str(r["ts"])
+                
+                # Flag translation
+                flag_val = "關注" if r["match_flag"] == "watch" else "異常"
+                
+                # DNS and Aliases resolution
+                src_ip = r["src"]
+                dst_ip = r["dst"]
+                src_domain = ip_aliases_cache.get(src_ip, dns_map.get(src_ip, ""))
+                dst_domain = ip_aliases_cache.get(dst_ip, dns_map.get(dst_ip, ""))
+                
+                sport_val = r["sport"]
+                dport_val = r["dport"]
+                sport_name = port_aliases_cache.get(sport_val, "")
+                dport_name = port_aliases_cache.get(dport_val, "")
+                
+                row_data = [
+                    m_ts, f_ts, flag_val, r["rule_ip"] or "(任意)", r["rule_port"] or "(任意)",
+                    src_ip, src_domain, sport_val, sport_name,
+                    dst_ip, dst_domain, dport_val, dport_name,
+                    r["proto"], r["packets"], r["octets"]
+                ]
+                writer.writerow(row_data)
+                yield output.getvalue()
+                output.seek(0)
+                output.truncate(0)
+                
+        headers = {
+            'Content-Disposition': 'attachment; filename="anomalous_traffic_report.csv"',
+            'Content-Type': 'text/csv; charset=utf-8'
+        }
+        return StreamingResponse(csv_generator(), headers=headers)
+        
     except Exception as e:
         reset_ch_client()
         raise HTTPException(status_code=500, detail=str(e))

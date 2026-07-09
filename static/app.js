@@ -18,6 +18,28 @@ let state = {
         offset: 0,
         total: 0
     },
+    auditPagination: {
+        limit: 50,
+        offset: 0,
+        total: 0
+    },
+    anomaliesPagination: {
+        limit: 50,
+        offset: 0,
+        total: 0
+    },
+    auditFilters: {
+        src: '',
+        dst: '',
+        port: '',
+        flag: ''
+    },
+    anomaliesFilters: {
+        src: '',
+        dst: '',
+        port: '',
+        flag: ''
+    },
     sorting: {
         by: 'ts',
         order: 'desc'
@@ -30,13 +52,65 @@ let state = {
 const els = {
     btnTabExplorer: document.getElementById('btn-tab-explorer'),
     btnTabAnalytics: document.getElementById('btn-tab-analytics'),
-    btnTabSettings: document.getElementById('btn-tab-settings'),
+    btnTabAnomalies: document.getElementById('btn-tab-anomalies'),
+    btnTabSettingsTrigger: document.getElementById('btn-tab-settings-trigger'),
+    btnTabManagement: document.getElementById('btn-tab-management'),
+    btnTabAliases: document.getElementById('btn-tab-aliases'),
+    btnTabAudit: document.getElementById('btn-tab-audit'),
     viewExplorer: document.getElementById('view-explorer'),
     viewAnalytics: document.getElementById('view-analytics'),
-    viewSettings: document.getElementById('view-settings'),
+    viewAnomalies: document.getElementById('view-anomalies'),
+    viewDataManagement: document.getElementById('view-data-management'),
+    viewAliasManager: document.getElementById('view-alias-manager'),
+    viewAudit: document.getElementById('view-audit'),
     cleanupBeforeDate: document.getElementById('cleanup-before-date'),
     btnExecuteCleanup: document.getElementById('btn-execute-cleanup'),
     cleanupStatusMessage: document.getElementById('cleanup-status-message'),
+    
+    // Auditing Elements
+    btnTriggerAudit: document.getElementById('btn-trigger-audit'),
+    auditLastRunTime: document.getElementById('audit-last-run-time'),
+    auditNextRunTime: document.getElementById('audit-next-run-time'),
+    auditLastRunStatus: document.getElementById('audit-last-run-status'),
+    auditLastRunMatches: document.getElementById('audit-last-run-matches'),
+    auditLastRunMessage: document.getElementById('audit-last-run-message'),
+    auditTriggerStatus: document.getElementById('audit-trigger-status'),
+    auditRuleForm: document.getElementById('audit-rule-form'),
+    auditInputIp: document.getElementById('audit-input-ip'),
+    auditInputPort: document.getElementById('audit-input-port'),
+    auditRuleStatusMessage: document.getElementById('audit-rule-status-message'),
+    auditRulesTbody: document.getElementById('audit-rules-tbody'),
+    btnExportRules: document.getElementById('btn-export-rules'),
+    btnImportRules: document.getElementById('btn-import-rules'),
+    inputImportRules: document.getElementById('input-import-rules'),
+    
+    // Audit Search / Table / Pagination
+    auditPageSize: document.getElementById('audit-page-size'),
+    btnClearAuditMatches: document.getElementById('btn-clear-audit-matches'),
+    btnExportAuditMatches: document.getElementById('btn-export-audit-matches'),
+    auditTotalFiltered: document.getElementById('audit-total-filtered'),
+    auditPagination: document.getElementById('audit-pagination'),
+    auditMatchesTbody: document.getElementById('audit-matches-tbody'),
+    filterAuditSrc: document.getElementById('filter-audit-src'),
+    filterAuditDst: document.getElementById('filter-audit-dst'),
+    filterAuditPort: document.getElementById('filter-audit-port'),
+    filterAuditFlag: document.getElementById('filter-audit-flag'),
+    btnApplyAuditSearch: document.getElementById('btn-apply-audit-search'),
+    btnResetAuditSearch: document.getElementById('btn-reset-audit-search'),
+
+    // Anomalies Report elements
+    anomaliesPageSize: document.getElementById('anomalies-page-size'),
+    btnExportAnomalies: document.getElementById('btn-export-anomalies'),
+    anomaliesTotalFiltered: document.getElementById('anomalies-total-filtered'),
+    anomaliesPagination: document.getElementById('anomalies-pagination'),
+    anomaliesTbody: document.getElementById('anomalies-tbody'),
+    filterAnomaliesSrc: document.getElementById('filter-anomalies-src'),
+    filterAnomaliesDst: document.getElementById('filter-anomalies-dst'),
+    filterAnomaliesPort: document.getElementById('filter-anomalies-port'),
+    filterAnomaliesFlag: document.getElementById('filter-anomalies-flag'),
+    btnApplyAnomaliesSearch: document.getElementById('btn-apply-anomalies-search'),
+    btnResetAnomaliesSearch: document.getElementById('btn-reset-anomalies-search'),
+    
     globalTimeRange: document.getElementById('global-time-range'),
     btnRefresh: document.getElementById('btn-refresh'),
     timeRangeSummary: document.getElementById('time-range-summary'),
@@ -92,6 +166,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setupColumnToggles();
     setupDropdowns();
     fetchExporterDropdown();
+    fetchPortAliases();
+    fetchIpAliases();
     refreshData();
 });
 
@@ -108,14 +184,227 @@ function setupEventListeners() {
         switchTab('analytics');
     });
 
-    els.btnTabSettings.addEventListener('click', (e) => {
-        e.preventDefault();
-        switchTab('settings');
-    });
+    if (els.btnTabAnomalies) {
+        els.btnTabAnomalies.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('anomalies');
+        });
+    }
+
+    if (els.btnTabSettingsTrigger) {
+        els.btnTabSettingsTrigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            const submenu = document.querySelector('#menu-settings .submenu');
+            const chevron = els.btnTabSettingsTrigger.querySelector('.chevron-icon');
+            if (submenu) {
+                const isOpen = submenu.style.display === 'flex';
+                submenu.style.display = isOpen ? 'none' : 'flex';
+                if (chevron) {
+                    chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(-180deg)';
+                }
+            }
+        });
+    }
+
+    if (els.btnTabManagement) {
+        els.btnTabManagement.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('data-management');
+        });
+    }
+
+    if (els.btnTabAliases) {
+        els.btnTabAliases.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('aliases');
+        });
+    }
+
+    if (els.btnTabAudit) {
+        els.btnTabAudit.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('audit');
+        });
+    }
+
+    if (els.auditRuleForm) {
+        els.auditRuleForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitAuditRule();
+        });
+    }
+
+    if (els.btnTriggerAudit) {
+        els.btnTriggerAudit.addEventListener('click', () => {
+            triggerManualAudit();
+        });
+    }
+
+    if (els.btnClearAuditMatches) {
+        els.btnClearAuditMatches.addEventListener('click', () => {
+            clearAuditMatches();
+        });
+    }
+    
+    if (els.auditPageSize) {
+        els.auditPageSize.addEventListener('change', () => {
+            state.auditPagination.limit = parseInt(els.auditPageSize.value);
+            state.auditPagination.offset = 0;
+            fetchAuditMatches();
+        });
+    }
+
+    if (els.btnApplyAuditSearch) {
+        els.btnApplyAuditSearch.addEventListener('click', () => {
+            state.auditFilters.src = els.filterAuditSrc.value.trim();
+            state.auditFilters.dst = els.filterAuditDst.value.trim();
+            state.auditFilters.port = els.filterAuditPort.value.trim();
+            state.auditFilters.flag = els.filterAuditFlag.value;
+            state.auditPagination.offset = 0;
+            fetchAuditMatches();
+        });
+    }
+
+    if (els.btnResetAuditSearch) {
+        els.btnResetAuditSearch.addEventListener('click', () => {
+            els.filterAuditSrc.value = '';
+            els.filterAuditDst.value = '';
+            els.filterAuditPort.value = '';
+            els.filterAuditFlag.value = '';
+            state.auditFilters.src = '';
+            state.auditFilters.dst = '';
+            state.auditFilters.port = '';
+            state.auditFilters.flag = '';
+            state.auditPagination.offset = 0;
+            fetchAuditMatches();
+        });
+    }
+
+    if (els.btnExportAuditMatches) {
+        els.btnExportAuditMatches.addEventListener('click', () => {
+            let url = `/api/audit/matches/export?`;
+            const params = [];
+            if (state.auditFilters.src) params.push(`src=${encodeURIComponent(state.auditFilters.src)}`);
+            if (state.auditFilters.dst) params.push(`dst=${encodeURIComponent(state.auditFilters.dst)}`);
+            if (state.auditFilters.port) params.push(`port=${encodeURIComponent(state.auditFilters.port)}`);
+            if (state.auditFilters.flag) params.push(`flag=${encodeURIComponent(state.auditFilters.flag)}`);
+            window.open(url + params.join('&'), '_blank');
+        });
+    }
+
+    if (els.anomaliesPageSize) {
+        els.anomaliesPageSize.addEventListener('change', () => {
+            state.anomaliesPagination.limit = parseInt(els.anomaliesPageSize.value);
+            state.anomaliesPagination.offset = 0;
+            fetchAnomalousReport();
+        });
+    }
+
+    if (els.btnApplyAnomaliesSearch) {
+        els.btnApplyAnomaliesSearch.addEventListener('click', () => {
+            state.anomaliesFilters.src = els.filterAnomaliesSrc.value.trim();
+            state.anomaliesFilters.dst = els.filterAnomaliesDst.value.trim();
+            state.anomaliesFilters.port = els.filterAnomaliesPort.value.trim();
+            state.anomaliesFilters.flag = els.filterAnomaliesFlag.value;
+            state.anomaliesPagination.offset = 0;
+            fetchAnomalousReport();
+        });
+    }
+
+    if (els.btnResetAnomaliesSearch) {
+        els.btnResetAnomaliesSearch.addEventListener('click', () => {
+            els.filterAnomaliesSrc.value = '';
+            els.filterAnomaliesDst.value = '';
+            els.filterAnomaliesPort.value = '';
+            els.filterAnomaliesFlag.value = '';
+            state.anomaliesFilters.src = '';
+            state.anomaliesFilters.dst = '';
+            state.anomaliesFilters.port = '';
+            state.anomaliesFilters.flag = '';
+            state.anomaliesPagination.offset = 0;
+            fetchAnomalousReport();
+        });
+    }
+
+    if (els.btnExportAnomalies) {
+        els.btnExportAnomalies.addEventListener('click', () => {
+            let url = `/api/audit/matches/export?`;
+            const params = [];
+            if (state.anomaliesFilters.src) params.push(`src=${encodeURIComponent(state.anomaliesFilters.src)}`);
+            if (state.anomaliesFilters.dst) params.push(`dst=${encodeURIComponent(state.anomaliesFilters.dst)}`);
+            if (state.anomaliesFilters.port) params.push(`port=${encodeURIComponent(state.anomaliesFilters.port)}`);
+            if (state.anomaliesFilters.flag) params.push(`flag=${encodeURIComponent(state.anomaliesFilters.flag)}`);
+            window.open(url + params.join('&'), '_blank');
+        });
+    }
 
     els.btnExecuteCleanup.addEventListener('click', () => {
         executeCleanup();
     });
+
+    if (els.btnExportRules) {
+        els.btnExportRules.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/audit/rules/export');
+                if (!res.ok) throw new Error('Export request failed');
+                const data = await res.json();
+                
+                // Trigger download
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'netflow_audit_rules_backup.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showAuditRuleStatus('Audit rules backup file downloaded successfully', 'success');
+            } catch (err) {
+                showAuditRuleStatus(`Export failed: ${err.message}`, 'error');
+            }
+        });
+    }
+
+    if (els.btnImportRules && els.inputImportRules) {
+        els.btnImportRules.addEventListener('click', () => {
+            els.inputImportRules.click();
+        });
+
+        els.inputImportRules.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const payload = JSON.parse(event.target.result);
+                    if (!Array.isArray(payload)) {
+                        throw new Error('Invalid backup file format (expected a JSON array of rules)');
+                    }
+
+                    const res = await fetch('/api/audit/rules/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    
+                    if (res.ok) {
+                        showAuditRuleStatus(data.message || 'Import successful', 'success');
+                        fetchAuditRules(); // Reload rule table
+                    } else {
+                        showAuditRuleStatus(data.detail || 'Import failed', 'error');
+                    }
+                } catch (err) {
+                    showAuditRuleStatus(`Import parse error: ${err.message}`, 'error');
+                }
+                // Reset file input value to allow importing the same file again
+                els.inputImportRules.value = '';
+            };
+            reader.readAsText(file);
+        });
+    }
     
     // Global actions
     els.globalTimeRange.addEventListener('change', () => {
@@ -215,16 +504,156 @@ function setupEventListeners() {
             closeModal();
         }
     });
+    
+    // Port Alias form listener
+    const formPortAlias = document.getElementById('form-port-alias');
+    if (formPortAlias) {
+        formPortAlias.addEventListener('submit', handleSavePortAlias);
+    }
+
+    // IP Alias form listener
+    const formIpAlias = document.getElementById('form-ip-alias');
+    if (formIpAlias) {
+        formIpAlias.addEventListener('submit', handleSaveIpAlias);
+    }
+
+    // Segmented toggle button listeners for Alias Manager
+    const btnToggleIp = document.getElementById('btn-toggle-ip');
+    const btnTogglePort = document.getElementById('btn-toggle-port');
+    const containerIpAlias = document.getElementById('container-ip-alias');
+    const containerPortAlias = document.getElementById('container-port-alias');
+
+    if (btnToggleIp && btnTogglePort && containerIpAlias && containerPortAlias) {
+        btnToggleIp.addEventListener('click', () => {
+            btnToggleIp.classList.add('active');
+            btnTogglePort.classList.remove('active');
+            containerIpAlias.style.display = 'block';
+            containerPortAlias.style.display = 'none';
+        });
+
+        btnTogglePort.addEventListener('click', () => {
+            btnTogglePort.classList.add('active');
+            btnToggleIp.classList.remove('active');
+            containerPortAlias.style.display = 'block';
+            containerIpAlias.style.display = 'none';
+        });
+    }
+
+    // Export / Import Backup bindings
+    const btnExportAliases = document.getElementById('btn-export-aliases');
+    const btnImportAliases = document.getElementById('btn-import-aliases');
+    const inputImportAliases = document.getElementById('input-import-aliases');
+
+    if (btnExportAliases) {
+        btnExportAliases.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/aliases/export');
+                if (!res.ok) throw new Error('Export request failed');
+                const data = await res.json();
+                
+                // Trigger download
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'netflow_aliases_backup.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showIpAliasStatus('Aliases backup file downloaded successfully', 'success');
+            } catch (err) {
+                showIpAliasStatus(`Export failed: ${err.message}`, 'error');
+            }
+        });
+    }
+
+    if (btnImportAliases && inputImportAliases) {
+        btnImportAliases.addEventListener('click', () => {
+            inputImportAliases.click();
+        });
+
+        inputImportAliases.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const payload = JSON.parse(event.target.result);
+                    if (!payload.ip_aliases || !payload.port_aliases) {
+                        throw new Error('Invalid backup file format (missing ip_aliases or port_aliases)');
+                    }
+
+                    const res = await fetch('/api/aliases/import', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!res.ok) throw new Error('API import request failed');
+                    const result = await res.json();
+                    
+                    showIpAliasStatus(result.message, 'success');
+                    fetchIpAliases();
+                    fetchPortAliases();
+                    fetchFlows();
+                } catch (err) {
+                    showIpAliasStatus(`Import failed: ${err.message}`, 'error');
+                } finally {
+                    // Reset input
+                    inputImportAliases.value = '';
+                }
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    const btnClearAliases = document.getElementById('btn-clear-aliases');
+    if (btnClearAliases) {
+        btnClearAliases.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to delete ALL custom IP and Port aliases? This cannot be undone.')) return;
+            
+            try {
+                const res = await fetch('/api/aliases/clear', { method: 'POST' });
+                if (!res.ok) throw new Error('Clear request failed');
+                const result = await res.json();
+                
+                showIpAliasStatus(result.message, 'success');
+                showPortAliasStatus(result.message, 'success');
+                
+                fetchIpAliases();
+                fetchPortAliases();
+                fetchFlows();
+            } catch (err) {
+                showIpAliasStatus(`Clear failed: ${err.message}`, 'error');
+            }
+        });
+    }
 }
 
 // Tab Switching logic
 function switchTab(tabName) {
     state.activeTab = tabName;
     
-    // Hide filter card if settings tab is active
+    // Hide filter card if settings/report tabs are active
+    const isSettingsTab = ['data-management', 'aliases', 'audit', 'anomalies'].includes(tabName);
     const filterCard = document.querySelector('.filter-card');
     if (filterCard) {
-        filterCard.style.display = tabName === 'settings' ? 'none' : 'block';
+        filterCard.style.display = isSettingsTab ? 'none' : 'block';
+    }
+    
+    // Show/hide top header and KPI grid (only needed for Flow Explorer and Traffic Analytics)
+    const showHeaderKpi = ['explorer', 'analytics'].includes(tabName);
+    const topHeader = document.querySelector('.top-header');
+    const kpiGrid = document.querySelector('.kpi-grid');
+    if (topHeader) {
+        topHeader.style.display = showHeaderKpi ? 'flex' : 'none';
+    }
+    if (kpiGrid) {
+        kpiGrid.style.display = showHeaderKpi ? 'grid' : 'none';
     }
     
     const columnsDropdown = document.getElementById('dropdown-columns');
@@ -238,11 +667,18 @@ function switchTab(tabName) {
     // Remove active from all tabs and views
     els.btnTabExplorer.classList.remove('active');
     els.btnTabAnalytics.classList.remove('active');
-    els.btnTabSettings.classList.remove('active');
+    if (els.btnTabAnomalies) els.btnTabAnomalies.classList.remove('active');
+    if (els.btnTabSettingsTrigger) els.btnTabSettingsTrigger.classList.remove('active');
+    if (els.btnTabManagement) els.btnTabManagement.classList.remove('active');
+    if (els.btnTabAliases) els.btnTabAliases.classList.remove('active');
+    if (els.btnTabAudit) els.btnTabAudit.classList.remove('active');
     
     els.viewExplorer.classList.remove('active');
     els.viewAnalytics.classList.remove('active');
-    els.viewSettings.classList.remove('active');
+    if (els.viewAnomalies) els.viewAnomalies.classList.remove('active');
+    if (els.viewDataManagement) els.viewDataManagement.classList.remove('active');
+    if (els.viewAliasManager) els.viewAliasManager.classList.remove('active');
+    if (els.viewAudit) els.viewAudit.classList.remove('active');
     
     // Activate selected tab and view
     if (tabName === 'explorer') {
@@ -253,9 +689,41 @@ function switchTab(tabName) {
         els.btnTabAnalytics.classList.add('active');
         els.viewAnalytics.classList.add('active');
         refreshData();
-    } else if (tabName === 'settings') {
-        els.btnTabSettings.classList.add('active');
-        els.viewSettings.classList.add('active');
+    } else if (tabName === 'anomalies') {
+        if (els.btnTabAnomalies) els.btnTabAnomalies.classList.add('active');
+        if (els.viewAnomalies) els.viewAnomalies.classList.add('active');
+        fetchAnomalousReport();
+    } else {
+        // Settings sub-tabs routing
+        let activeBtn = null;
+        let activeView = null;
+        
+        if (tabName === 'data-management') {
+            activeBtn = els.btnTabManagement;
+            activeView = els.viewDataManagement;
+        } else if (tabName === 'aliases') {
+            activeBtn = els.btnTabAliases;
+            activeView = els.viewAliasManager;
+        } else if (tabName === 'audit') {
+            activeBtn = els.btnTabAudit;
+            activeView = els.viewAudit;
+            fetchAuditRules();
+            fetchAuditStatus();
+            fetchAuditMatches();
+        }
+        
+        if (activeBtn) activeBtn.classList.add('active');
+        if (activeView) activeView.classList.add('active');
+        
+        // Auto-expand Settings submenu if collapsed
+        const submenu = document.querySelector('#menu-settings .submenu');
+        const chevron = document.querySelector('#btn-tab-settings-trigger .chevron-icon');
+        if (submenu) {
+            submenu.style.display = 'flex';
+            if (chevron) {
+                chevron.style.transform = 'rotate(-180deg)';
+            }
+        }
     }
 }
 
@@ -476,12 +944,18 @@ function renderFlowsTable() {
                 <strong>${r.src || '-'}</strong>
                 ${r.src_domain ? `<div class="domain-subtext" title="${r.src_domain}">${r.src_domain}</div>` : ''}
             </td>
-            <td class="col-sport"><span class="text-secondary">${r.sport !== null && r.sport !== undefined ? r.sport : '-'}</span></td>
+            <td class="col-sport">
+                <span class="text-secondary">${r.sport !== null && r.sport !== undefined ? r.sport : '-'}</span>
+                ${r.sport_name ? `<div class="domain-subtext" title="${r.sport_name}">${r.sport_name}</div>` : ''}
+            </td>
             <td class="col-dst">
                 <strong>${r.dst || '-'}</strong>
                 ${r.dst_domain ? `<div class="domain-subtext" title="${r.dst_domain}">${r.dst_domain}</div>` : ''}
             </td>
-            <td class="col-dport"><span class="text-secondary">${r.dport !== null && r.dport !== undefined ? r.dport : '-'}</span></td>
+            <td class="col-dport">
+                <span class="text-secondary">${r.dport !== null && r.dport !== undefined ? r.dport : '-'}</span>
+                ${r.dport_name ? `<div class="domain-subtext" title="${r.dport_name}">${r.dport_name}</div>` : ''}
+            </td>
             <td class="col-proto"><span class="badge badge-success">${protocolText}</span></td>
             <td class="col-packets">${formatNumber(r.packets)}</td>
             <td class="col-octets"><strong>${formatBytes(r.octets)}</strong></td>
@@ -1168,4 +1642,974 @@ function showCleanupStatus(message, type) {
         el.style.color = '#818cf8';
         el.style.border = '1px solid rgba(99, 102, 241, 0.3)';
     }
+}
+
+// Fetch and render Port Aliases
+async function fetchPortAliases() {
+    const tbody = document.getElementById('port-aliases-tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="3" class="text-center text-muted py-3">Loading aliases...</td>
+        </tr>
+    `;
+
+    try {
+        const res = await fetch('/api/ports/aliases');
+        if (!res.ok) throw new Error('Failed to fetch port aliases');
+        const list = await res.json();
+        
+        renderPortAliasesTable(list);
+    } catch (err) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted py-3">
+                    <span style="color: var(--color-danger);">Error: ${err.message}</span>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+// Render the Port Aliases table rows
+function renderPortAliasesTable(list) {
+    const tbody = document.getElementById('port-aliases-tbody');
+    if (!tbody) return;
+
+    if (list.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted py-3">No custom port aliases configured.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = '';
+    list.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="padding: 8px 12px; color: var(--text-primary); font-weight: 500; width: 35%;">${item.port}</td>
+            <td class="name-cell" style="padding: 8px 12px; color: var(--text-secondary); width: 45%;">${item.name}</td>
+            <td class="actions-cell" style="padding: 8px 12px; text-align: right; width: 20%;">
+                <button class="btn-edit-alias" style="background: none; border: none; color: var(--color-primary); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s; margin-right: 6px;">
+                    <i data-lucide="edit-2" style="width: 14px; height: 14px;"></i>
+                </button>
+                <button class="btn-delete-alias" style="background: none; border: none; color: var(--color-danger); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s;">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                </button>
+            </td>
+        `;
+        
+        const nameCell = tr.querySelector('.name-cell');
+        const actionsCell = tr.querySelector('.actions-cell');
+        const btnEdit = tr.querySelector('.btn-edit-alias');
+        const btnDelete = tr.querySelector('.btn-delete-alias');
+        
+        // Bind edit action (inline edit)
+        btnEdit.addEventListener('click', () => {
+            nameCell.innerHTML = `<input type="text" class="form-control select-dark edit-name-input" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; color: var(--text-primary); font-size: 0.85rem;" value="${item.name.replace(/"/g, '&quot;')}">`;
+            
+            actionsCell.innerHTML = `
+                <button class="btn-save-edit" style="background: none; border: none; color: var(--color-success); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s; margin-right: 6px;">
+                    <i data-lucide="check" style="width: 14px; height: 14px;"></i>
+                </button>
+                <button class="btn-cancel-edit" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s;">
+                    <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+                </button>
+            `;
+            
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
+            
+            const saveBtn = actionsCell.querySelector('.btn-save-edit');
+            const cancelBtn = actionsCell.querySelector('.btn-cancel-edit');
+            const editInput = nameCell.querySelector('.edit-name-input');
+            
+            editInput.focus();
+            
+            saveBtn.addEventListener('click', async () => {
+                const newName = editInput.value.trim();
+                if (!newName) {
+                    showPortAliasStatus('Alias name cannot be empty', 'error');
+                    return;
+                }
+                
+                try {
+                    const res = await fetch(`/api/ports/aliases?port=${item.port}&name=${encodeURIComponent(newName)}`, { method: 'POST' });
+                    if (!res.ok) throw new Error('Save request failed');
+                    showPortAliasStatus('Port alias updated successfully', 'success');
+                    fetchPortAliases();
+                    fetchFlows();
+                } catch (err) {
+                    showPortAliasStatus(`Error saving: ${err.message}`, 'error');
+                }
+            });
+            
+            cancelBtn.addEventListener('click', () => {
+                renderPortAliasesTable(list);
+            });
+            
+            editInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    saveBtn.click();
+                } else if (e.key === 'Escape') {
+                    cancelBtn.click();
+                }
+            });
+        });
+        
+        // Bind delete action
+        btnDelete.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm(`Are you sure you want to delete alias for port ${item.port}?`)) return;
+            
+            try {
+                const res = await fetch(`/api/ports/aliases/${item.port}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete request failed');
+                showPortAliasStatus('Alias deleted successfully', 'success');
+                fetchPortAliases();
+                fetchFlows();
+            } catch (err) {
+                showPortAliasStatus(`Error deleting: ${err.message}`, 'error');
+            }
+        });
+        
+        tbody.appendChild(tr);
+    });
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
+}
+
+// Save/Update Port Alias handler
+async function handleSavePortAlias(e) {
+    e.preventDefault();
+    const inputPort = document.getElementById('input-alias-port');
+    const inputName = document.getElementById('input-alias-name');
+    if (!inputPort || !inputName) return;
+
+    const port = parseInt(inputPort.value);
+    const name = inputName.value.trim();
+
+    if (!port || !name) {
+        showPortAliasStatus('Please fill in both port and name.', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/ports/aliases?port=${port}&name=${encodeURIComponent(name)}`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to save port alias');
+        
+        showPortAliasStatus(`Successfully mapped port ${port} as ${name}`, 'success');
+        inputPort.value = '';
+        inputName.value = '';
+        fetchPortAliases();
+        // Refresh flows table to reflect names update immediately
+        fetchFlows();
+    } catch (err) {
+        showPortAliasStatus(`Error saving: ${err.message}`, 'error');
+    }
+}
+
+// Show status message for Port Alias form
+function showPortAliasStatus(message, type) {
+    const el = document.getElementById('port-alias-status-message');
+    if (!el) return;
+
+    el.style.display = 'block';
+    el.innerText = message;
+    el.style.backgroundColor = '';
+    el.style.color = '';
+    el.style.border = '';
+
+    if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+        el.style.color = '#818cf8';
+        el.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+    }
+
+    // Auto hide after 4 seconds
+    setTimeout(() => {
+        el.style.display = 'none';
+    }, 4000);
+}
+
+// Fetch and render IP Aliases
+async function fetchIpAliases() {
+    const tbody = document.getElementById('ip-aliases-tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="3" class="text-center text-muted py-3">Loading IP aliases...</td>
+        </tr>
+    `;
+
+    try {
+        const res = await fetch('/api/ips/aliases');
+        if (!res.ok) throw new Error('Failed to fetch IP aliases');
+        const list = await res.json();
+        
+        renderIpAliasesTable(list);
+    } catch (err) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted py-3">
+                    <span style="color: var(--color-danger);">Error: ${err.message}</span>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+// Render the IP Aliases table rows
+function renderIpAliasesTable(list) {
+    const tbody = document.getElementById('ip-aliases-tbody');
+    if (!tbody) return;
+
+    if (list.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted py-3">No custom IP aliases configured.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = '';
+    list.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="padding: 8px 12px; color: var(--text-primary); font-weight: 500; width: 35%;">${item.ip}</td>
+            <td class="name-cell" style="padding: 8px 12px; color: var(--text-secondary); width: 45%;">${item.name}</td>
+            <td class="actions-cell" style="padding: 8px 12px; text-align: right; width: 20%;">
+                <button class="btn-edit-ip-alias" style="background: none; border: none; color: var(--color-primary); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s; margin-right: 6px;">
+                    <i data-lucide="edit-2" style="width: 14px; height: 14px;"></i>
+                </button>
+                <button class="btn-delete-ip-alias" style="background: none; border: none; color: var(--color-danger); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s;">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                </button>
+            </td>
+        `;
+        
+        const nameCell = tr.querySelector('.name-cell');
+        const actionsCell = tr.querySelector('.actions-cell');
+        const btnEdit = tr.querySelector('.btn-edit-ip-alias');
+        const btnDelete = tr.querySelector('.btn-delete-ip-alias');
+        
+        // Bind edit action (inline edit)
+        btnEdit.addEventListener('click', () => {
+            // Swap name cell to input
+            nameCell.innerHTML = `<input type="text" class="form-control select-dark edit-name-input" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; color: var(--text-primary); font-size: 0.85rem;" value="${item.name.replace(/"/g, '&quot;')}">`;
+            
+            // Swap actions to Save / Cancel
+            actionsCell.innerHTML = `
+                <button class="btn-save-edit" style="background: none; border: none; color: var(--color-success); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s; margin-right: 6px;">
+                    <i data-lucide="check" style="width: 14px; height: 14px;"></i>
+                </button>
+                <button class="btn-cancel-edit" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s;">
+                    <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+                </button>
+            `;
+            
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                window.lucide.createIcons();
+            }
+            
+            const saveBtn = actionsCell.querySelector('.btn-save-edit');
+            const cancelBtn = actionsCell.querySelector('.btn-cancel-edit');
+            const editInput = nameCell.querySelector('.edit-name-input');
+            
+            editInput.focus();
+            
+            saveBtn.addEventListener('click', async () => {
+                const newName = editInput.value.trim();
+                if (!newName) {
+                    showIpAliasStatus('Alias label cannot be empty', 'error');
+                    return;
+                }
+                
+                try {
+                    const res = await fetch(`/api/ips/aliases?ip=${encodeURIComponent(item.ip)}&name=${encodeURIComponent(newName)}`, { method: 'POST' });
+                    if (!res.ok) throw new Error('Save request failed');
+                    showIpAliasStatus('IP alias updated successfully', 'success');
+                    fetchIpAliases();
+                    fetchFlows();
+                } catch (err) {
+                    showIpAliasStatus(`Error saving: ${err.message}`, 'error');
+                }
+            });
+            
+            cancelBtn.addEventListener('click', () => {
+                // Restore original rows
+                renderIpAliasesTable(list);
+            });
+            
+            editInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    saveBtn.click();
+                } else if (e.key === 'Escape') {
+                    cancelBtn.click();
+                }
+            });
+        });
+        
+        // Bind delete action
+        btnDelete.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm(`Are you sure you want to delete alias for IP ${item.ip}?`)) return;
+            
+            try {
+                const res = await fetch(`/api/ips/aliases/${encodeURIComponent(item.ip)}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete request failed');
+                showIpAliasStatus('IP alias deleted successfully', 'success');
+                fetchIpAliases();
+                fetchFlows();
+            } catch (err) {
+                showIpAliasStatus(`Error deleting: ${err.message}`, 'error');
+            }
+        });
+        
+        tbody.appendChild(tr);
+    });
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
+}
+
+// Save/Update IP Alias handler
+async function handleSaveIpAlias(e) {
+    e.preventDefault();
+    const inputIp = document.getElementById('input-alias-ip');
+    const inputName = document.getElementById('input-alias-ip-name');
+    if (!inputIp || !inputName) return;
+
+    const ip = inputIp.value.trim();
+    const name = inputName.value.trim();
+
+    if (!ip || !name) {
+        showIpAliasStatus('Please fill in both IP and alias name.', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/ips/aliases?ip=${encodeURIComponent(ip)}&name=${encodeURIComponent(name)}`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to save IP alias');
+        
+        showIpAliasStatus(`Successfully mapped IP ${ip} as ${name}`, 'success');
+        inputIp.value = '';
+        inputName.value = '';
+        fetchIpAliases();
+        // Refresh flows table to reflect names update immediately
+        fetchFlows();
+    } catch (err) {
+        showIpAliasStatus(`Error saving: ${err.message}`, 'error');
+    }
+}
+
+// Show status message for IP Alias form
+function showIpAliasStatus(message, type) {
+    const el = document.getElementById('ip-alias-status-message');
+    if (!el) return;
+
+    el.style.display = 'block';
+    el.innerText = message;
+    el.style.backgroundColor = '';
+    el.style.color = '';
+    el.style.border = '';
+
+    if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+        el.style.color = '#818cf8';
+        el.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+    }
+
+    // Auto hide after 4 seconds
+    setTimeout(() => {
+        el.style.display = 'none';
+    }, 4000);
+}
+
+// === Traffic Auditing Module ===
+
+// Fetch all audit rules
+async function fetchAuditRules() {
+    try {
+        const response = await fetch('/api/audit/rules');
+        if (!response.ok) throw new Error('Failed to fetch rules');
+        const rules = await response.json();
+        
+        const tbody = els.auditRulesTbody;
+        if (!tbody) return;
+        
+        if (rules.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center text-muted py-4">目前無任何盤查規則</td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = rules.map(rule => {
+            const ipDisplay = rule.ip || '<span class="text-muted">(任意)</span>';
+            const portDisplay = rule.port || '<span class="text-muted">(任意)</span>';
+            const badgeClass = rule.flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
+            const flagText = rule.flag === 'watch' ? '關注' : '異常';
+            
+            return `
+                <tr>
+                    <td style="padding: 10px 12px; font-family: var(--font-mono);">${ipDisplay}</td>
+                    <td style="padding: 10px 12px; font-family: var(--font-mono);">${portDisplay}</td>
+                    <td style="padding: 10px 12px; text-align: center;">
+                        <span class="badge ${badgeClass}">${flagText}</span>
+                    </td>
+                    <td style="padding: 10px 12px; text-align: right;">
+                        <button class="btn btn-secondary btn-sm" onclick="deleteAuditRule(${rule.id})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">
+                            刪除
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (err) {
+        console.error('Error fetching audit rules:', err);
+    }
+}
+
+// Submit new rule
+async function submitAuditRule() {
+    const ip = els.auditInputIp.value.trim();
+    const port = els.auditInputPort.value.trim();
+    
+    const flagEl = document.querySelector('input[name="audit-input-flag"]:checked');
+    const flag = flagEl ? flagEl.value : 'watch';
+    
+    if (!ip && !port) {
+        showAuditRuleStatus('IP 與 Port 不能同時為空！', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/audit/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ip || null, port: port || null, flag })
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+            showAuditRuleStatus('規則儲存成功！', 'success');
+            els.auditInputIp.value = '';
+            els.auditInputPort.value = '';
+            fetchAuditRules();
+        } else {
+            showAuditRuleStatus(data.detail || '儲存失敗', 'error');
+        }
+    } catch (err) {
+        showAuditRuleStatus(`連線錯誤: ${err.message}`, 'error');
+    }
+}
+
+// Delete audit rule
+async function deleteAuditRule(ruleId) {
+    if (!confirm('確定要刪除此比對規則嗎？')) return;
+    try {
+        const response = await fetch(`/api/audit/rules/${ruleId}`, { method: 'DELETE' });
+        if (response.ok) {
+            fetchAuditRules();
+        } else {
+            const data = await response.json();
+            alert(data.detail || '刪除失敗');
+        }
+    } catch (err) {
+        alert(`連線錯誤: ${err.message}`);
+    }
+}
+
+// Fetch last audit status
+async function fetchAuditStatus() {
+    try {
+        const response = await fetch('/api/audit/status');
+        if (!response.ok) throw new Error('Failed to fetch audit status');
+        const status = await response.json();
+        
+        els.auditLastRunTime.innerText = status.run_ts || '-';
+        if (els.auditNextRunTime) {
+            els.auditNextRunTime.innerText = status.next_run_ts || '-';
+        }
+        els.auditLastRunMatches.innerText = status.records_matched !== undefined ? `${status.records_matched} 筆` : '-';
+        els.auditLastRunMessage.innerText = status.message || '-';
+        
+        const badge = els.auditLastRunStatus;
+        if (badge) {
+            badge.innerText = status.status === 'success' ? '成功' : (status.status === 'failed' ? '失敗' : '無');
+            badge.className = 'badge';
+            if (status.status === 'success') {
+                badge.classList.add('badge-success');
+            } else if (status.status === 'failed') {
+                badge.classList.add('badge-danger');
+            } else {
+                badge.classList.add('badge-info');
+            }
+        }
+    } catch (err) {
+        console.error('Error fetching audit status:', err);
+    }
+}
+
+// Trigger manual audit
+async function triggerManualAudit() {
+    showAuditTriggerStatus('正在執行流量比對盤查，請稍候...', 'info');
+    els.btnTriggerAudit.disabled = true;
+    
+    try {
+        const response = await fetch('/api/audit/run', { method: 'POST' });
+        const data = await response.json();
+        
+        if (response.ok) {
+            showAuditTriggerStatus(`盤查成功！共匹配到 ${data.records_matched} 筆流量。`, 'success');
+            fetchAuditStatus();
+            fetchAuditMatches();
+        } else {
+            showAuditTriggerStatus(data.detail || '盤查執行失敗', 'error');
+        }
+    } catch (err) {
+        showAuditTriggerStatus(`連線錯誤: ${err.message}`, 'error');
+    } finally {
+        els.btnTriggerAudit.disabled = false;
+    }
+}
+
+// Fetch permanently matched records
+// Fetch permanently matched records (Anomalous Traffic Report)
+async function fetchAuditMatches() {
+    const limit = state.auditPagination.limit;
+    const offset = state.auditPagination.offset;
+    
+    let url = `/api/audit/matches?limit=${limit}&offset=${offset}`;
+    if (state.auditFilters.src) url += `&src=${encodeURIComponent(state.auditFilters.src)}`;
+    if (state.auditFilters.dst) url += `&dst=${encodeURIComponent(state.auditFilters.dst)}`;
+    if (state.auditFilters.port) url += `&port=${encodeURIComponent(state.auditFilters.port)}`;
+    if (state.auditFilters.flag) url += `&flag=${encodeURIComponent(state.auditFilters.flag)}`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch matched records');
+        const data = await response.json();
+        
+        state.auditRecords = data.records; // Cache rules records in state
+        state.auditPagination.total = data.total;
+        els.auditTotalFiltered.innerText = data.total;
+        
+        renderAuditMatches(data.records);
+        renderAuditPagination(data.total);
+    } catch (err) {
+        console.error('Error fetching audit matches:', err);
+        const tbody = els.auditMatchesTbody;
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center text-danger py-4">載入失敗: ${err.message}</td></tr>`;
+        }
+    }
+}
+
+// Render matches table
+function renderAuditMatches(records) {
+    const tbody = els.auditMatchesTbody;
+    if (!tbody) return;
+    
+    if (records.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="13" class="text-center text-muted py-5">無任何比對符合的流量存檔資料</td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = records.map((r, idx) => {
+        const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
+        const flagText = r.match_flag === 'watch' ? '關注' : '異常';
+        
+        const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
+        const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
+        
+        return `
+            <tr class="flow-row" onclick="showAuditFlowDetails(${idx})">
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-secondary);">${r.match_ts}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.ts}</td>
+                <td style="padding: 10px 12px; text-align: center;">
+                    <span class="badge ${badgeClass}">${flagText}</span>
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_ip || '(任意)'}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
+                <td style="padding: 10px 12px;">
+                    <div>${r.src}</div>
+                    ${srcDomainSub}
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.sport}</td>
+                <td style="padding: 10px 12px;">
+                    <div>${r.dst}</div>
+                    ${dstDomainSub}
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.dport}</td>
+                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
+                <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
+                <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>
+                <td style="padding: 10px 12px; text-align: center;">
+                    <button class="btn-delete-match" data-id="${r.id}" style="background: none; border: none; color: var(--color-danger); cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.2s;">
+                        <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Bind delete actions
+    tbody.querySelectorAll('.btn-delete-match').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const matchId = btn.getAttribute('data-id');
+            if (!confirm('確認要刪除此筆異常流量報告？')) return;
+            try {
+                const res = await fetch(`/api/audit/matches/${encodeURIComponent(matchId)}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Delete request failed');
+                fetchAuditMatches();
+            } catch (err) {
+                alert(`刪除失敗: ${err.message}`);
+            }
+        });
+    });
+    
+    // Re-render Lucide icons
+    lucide.createIcons();
+}
+
+// Render pagination buttons for audit
+function renderAuditPagination(total) {
+    const el = els.auditPagination;
+    if (!el) return;
+    
+    const limit = state.auditPagination.limit;
+    const currentOffset = state.auditPagination.offset;
+    const totalPages = Math.ceil(total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+    
+    if (totalPages <= 1) {
+        el.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // Prev button
+    const prevDisabled = currentPage === 1 ? 'disabled' : '';
+    html += `<button class="btn btn-secondary btn-sm" ${prevDisabled} onclick="changeAuditPage(${currentPage - 1})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">&laquo;</button>`;
+    
+    // Page indicators
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage ? 'active' : '';
+        const style = i === currentPage ? 'background: var(--color-primary); border-color: var(--color-primary); color: white;' : '';
+        html += `<button class="btn btn-secondary btn-sm ${activeClass}" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; ${style}" onclick="changeAuditPage(${i})">${i}</button>`;
+    }
+    
+    // Next button
+    const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+    html += `<button class="btn btn-secondary btn-sm" ${nextDisabled} onclick="changeAuditPage(${currentPage + 1})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">&raquo;</button>`;
+    
+    el.innerHTML = html;
+}
+
+// Change audit matches page helper
+function changeAuditPage(pageNum) {
+    const limit = state.auditPagination.limit;
+    state.auditPagination.offset = (pageNum - 1) * limit;
+    fetchAuditMatches();
+}
+
+// Clear matched flows
+async function clearAuditMatches() {
+    if (!confirm('⚠️ 警告：確定要永久清除所有異常流量報告嗎？此操作將會清空該表，且無法復原！')) return;
+    
+    try {
+        const response = await fetch('/api/audit/matches', { method: 'DELETE' });
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert(data.message || '清除成功。');
+            state.auditPagination.offset = 0;
+            fetchAuditMatches();
+        } else {
+            alert(data.detail || '清除失敗');
+        }
+    } catch (err) {
+        alert(`連線錯誤: ${err.message}`);
+    }
+}
+
+// Show details modal specifically for audit records
+function showAuditFlowDetails(idx) {
+    const r = state.auditRecords[idx];
+    if (!r) return;
+    
+    els.detailId.innerText = r.id || 'N/A';
+    els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : 'N/A';
+    els.detailType.innerText = r.proto ? r.proto.toUpperCase() : 'N/A';
+    els.detailType.className = `value badge ${r.proto === 'ipfix' ? 'badge-info' : (r.proto === 'netflow9' ? 'badge-primary' : 'badge-warning')}`;
+    els.detailExporter.innerText = r.exporter || 'N/A';
+    els.detailSrc.innerText = r.src || 'N/A';
+    els.detailSrcDomain.innerText = r.src_domain || 'N/A';
+    els.detailDst.innerText = r.dst || 'N/A';
+    els.detailDstDomain.innerText = r.dst_domain || 'N/A';
+    els.detailProto.innerText = r.proto_name || r.proto || 'N/A';
+    els.detailOctets.innerText = `${formatNumber(r.octets)} bytes (${formatBytes(r.octets)})`;
+    els.detailPackets.innerText = formatNumber(r.packets);
+    
+    // Parse json_data
+    let raw = {};
+    if (r.json_data) {
+        try {
+            raw = JSON.parse(r.json_data);
+        } catch (e) {
+            raw = { error: "Failed to parse json_data", raw: r.json_data };
+        }
+    }
+    els.detailRawJson.innerText = JSON.stringify(raw, null, 2);
+    els.detailsModal.classList.add('active');
+}
+
+// Fetch Anomalous Report records for new tab (with filters)
+async function fetchAnomalousReport() {
+    const limit = state.anomaliesPagination.limit;
+    const offset = state.anomaliesPagination.offset;
+    
+    let url = `/api/audit/matches?limit=${limit}&offset=${offset}`;
+    if (state.anomaliesFilters.src) url += `&src=${encodeURIComponent(state.anomaliesFilters.src)}`;
+    if (state.anomaliesFilters.dst) url += `&dst=${encodeURIComponent(state.anomaliesFilters.dst)}`;
+    if (state.anomaliesFilters.port) url += `&port=${encodeURIComponent(state.anomaliesFilters.port)}`;
+    if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch anomalous records');
+        const data = await response.json();
+        
+        state.anomaliesRecords = data.records; // Cache in state
+        state.anomaliesPagination.total = data.total;
+        els.anomaliesTotalFiltered.innerText = data.total;
+        
+        renderAnomalousReportTable(data.records);
+        renderAnomaliesPagination(data.total);
+    } catch (err) {
+        console.error('Error fetching anomalous reports:', err);
+        const tbody = els.anomaliesTbody;
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">載入失敗: ${err.message}</td></tr>`;
+        }
+    }
+}
+
+// Render Anomalous Report table
+function renderAnomalousReportTable(records) {
+    const tbody = els.anomaliesTbody;
+    if (!tbody) return;
+    
+    if (records.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="12" class="text-center text-muted py-5">無任何異常流量報告資料</td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = records.map((r, idx) => {
+        const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
+        const flagText = r.match_flag === 'watch' ? '關注' : '異常';
+        
+        const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
+        const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
+        
+        return `
+            <tr class="flow-row" onclick="showAnomaliesFlowDetails(${idx})">
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-secondary);">${r.match_ts}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.ts}</td>
+                <td style="padding: 10px 12px; text-align: center;">
+                    <span class="badge ${badgeClass}">${flagText}</span>
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_ip || '(任意)'}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
+                <td style="padding: 10px 12px;">
+                    <div>${r.src}</div>
+                    ${srcDomainSub}
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.sport}</td>
+                <td style="padding: 10px 12px;">
+                    <div>${r.dst}</div>
+                    ${dstDomainSub}
+                </td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.dport}</td>
+                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
+                <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
+                <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    lucide.createIcons();
+}
+
+// Pagination logic for anomalies report
+function renderAnomaliesPagination(total) {
+    const el = els.anomaliesPagination;
+    if (!el) return;
+    
+    const limit = state.anomaliesPagination.limit;
+    const currentOffset = state.anomaliesPagination.offset;
+    const totalPages = Math.ceil(total / limit);
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+    
+    if (totalPages <= 1) {
+        el.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    const prevDisabled = currentPage === 1 ? 'disabled' : '';
+    html += `<button class="btn btn-secondary btn-sm" ${prevDisabled} onclick="changeAnomaliesPage(${currentPage - 1})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">&laquo;</button>`;
+    
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage ? 'active' : '';
+        const style = i === currentPage ? 'background: var(--color-primary); border-color: var(--color-primary); color: white;' : '';
+        html += `<button class="btn btn-secondary btn-sm ${activeClass}" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; ${style}" onclick="changeAnomaliesPage(${i})">${i}</button>`;
+    }
+    
+    const nextDisabled = currentPage === totalPages ? 'disabled' : '';
+    html += `<button class="btn btn-secondary btn-sm" ${nextDisabled} onclick="changeAnomaliesPage(${currentPage + 1})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">&raquo;</button>`;
+    
+    el.innerHTML = html;
+}
+
+function changeAnomaliesPage(page) {
+    const limit = state.anomaliesPagination.limit;
+    state.anomaliesPagination.offset = (page - 1) * limit;
+    fetchAnomalousReport();
+}
+
+// Show details modal specifically for anomalies records
+function showAnomaliesFlowDetails(idx) {
+    const r = state.anomaliesRecords[idx];
+    if (!r) return;
+    
+    els.detailId.innerText = r.id || 'N/A';
+    els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : 'N/A';
+    els.detailType.innerText = r.proto ? r.proto.toUpperCase() : 'N/A';
+    els.detailType.className = `value badge ${r.proto === 'ipfix' ? 'badge-info' : (r.proto === 'netflow9' ? 'badge-primary' : 'badge-warning')}`;
+    els.detailExporter.innerText = r.exporter || 'N/A';
+    els.detailSrc.innerText = r.src || 'N/A';
+    els.detailSrcDomain.innerText = r.src_domain || 'N/A';
+    els.detailDst.innerText = r.dst || 'N/A';
+    els.detailDstDomain.innerText = r.dst_domain || 'N/A';
+    els.detailProto.innerText = r.proto_name || r.proto || 'N/A';
+    els.detailOctets.innerText = `${formatNumber(r.octets)} bytes (${formatBytes(r.octets)})`;
+    els.detailPackets.innerText = formatNumber(r.packets);
+    
+    // Parse json_data
+    let raw = {};
+    if (r.json_data) {
+        try {
+            raw = JSON.parse(r.json_data);
+        } catch (e) {
+            raw = { error: "Failed to parse json_data", raw: r.json_data };
+        }
+    }
+    els.detailRawJson.innerText = JSON.stringify(raw, null, 2);
+    els.detailsModal.classList.add('active');
+}
+
+// Show rule status helper
+function showAuditRuleStatus(message, type) {
+    const el = els.auditRuleStatusMessage;
+    if (!el) return;
+    
+    el.style.display = 'block';
+    el.innerText = message;
+    el.style.backgroundColor = '';
+    el.style.color = '';
+    el.style.border = '';
+    
+    if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    }
+    
+    setTimeout(() => {
+        el.style.display = 'none';
+    }, 4000);
+}
+
+// Show manual trigger status helper
+function showAuditTriggerStatus(message, type) {
+    const el = els.auditTriggerStatus;
+    if (!el) return;
+    
+    el.style.display = 'block';
+    el.innerText = message;
+    el.style.backgroundColor = '';
+    el.style.color = '';
+    el.style.border = '';
+    
+    if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else { // info
+        el.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+        el.style.color = '#818cf8';
+        el.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+    }
+    
+    setTimeout(() => {
+        el.style.display = 'none';
+    }, 5000);
 }

@@ -1074,9 +1074,33 @@ th.sort-active .sort-icon {
 .btn-danger:hover {
     background-color: #dc2626;
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}/* Segmented Control Toggle styling */
+.segmented-btn.active {
+    background-color: var(--color-primary) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
 }
 
+.segmented-btn:hover:not(.active) {
+    color: var(--text-primary) !important;
+    background-color: rgba(255, 255, 255, 0.05);
+}
 
+/* Badges for Auditing System */
+.badge-danger {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--color-danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
 
+.badge-watch {
+    background-color: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
 
-
+.badge-anomaly {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--color-danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
