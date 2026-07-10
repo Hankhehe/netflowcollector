@@ -1832,6 +1832,18 @@ def create_audit_rule(rule: AuditRuleCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/audit/rules")
+def clear_audit_rules():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM audit_rules")
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "All audit rules cleared successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/audit/rules/{rule_id}")
 def delete_audit_rule(rule_id: int):
     try:

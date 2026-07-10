@@ -93,6 +93,7 @@ const els = {
     btnExportRules: document.getElementById('btn-export-rules'),
     btnImportRules: document.getElementById('btn-import-rules'),
     inputImportRules: document.getElementById('input-import-rules'),
+    btnClearRules: document.getElementById('btn-clear-rules'),
     
     // Audit Search / Table / Pagination
     auditPageSize: document.getElementById('audit-page-size'),
@@ -479,6 +480,26 @@ function setupEventListeners() {
                 els.inputImportRules.value = '';
             };
             reader.readAsText(file);
+        });
+    }
+
+    if (els.btnClearRules) {
+        els.btnClearRules.addEventListener('click', async () => {
+            if (!confirm('您確定要清除所有的流量盤查規則嗎？此動作將無法復原。')) {
+                return;
+            }
+            try {
+                const res = await fetch('/api/audit/rules', { method: 'DELETE' });
+                const data = await res.json();
+                if (res.ok) {
+                    showAuditRuleStatus('所有盤查規則已成功清除！', 'success');
+                    fetchAuditRules(); // Reload rules list
+                } else {
+                    showAuditRuleStatus(data.detail || '清除失敗', 'error');
+                }
+            } catch (err) {
+                showAuditRuleStatus(`清除錯誤: ${err.message}`, 'error');
+            }
         });
     }
     
