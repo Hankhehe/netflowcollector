@@ -2436,7 +2436,7 @@ function renderAuditMatches(records) {
                     <div>${r.dport}</div>
                     ${dportAliasSub}
                 </td>
-                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
+                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto_name}</span></td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>
                 <td style="padding: 10px 12px; text-align: center;">
@@ -2644,7 +2644,7 @@ function renderAnomalousReportTable(records) {
                     <div>${r.dport}</div>
                     ${dportAliasSub}
                 </td>
-                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto}</span></td>
+                <td style="padding: 10px 12px;"><span class="badge badge-info">${r.proto_name}</span></td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono);">${r.packets.toLocaleString()}</td>
                 <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); font-weight: 500;">${formatBytes(r.octets)}</td>
             </tr>
@@ -2812,6 +2812,26 @@ async function fetchAnomalousReportStats() {
             '目的流量 (Bytes)',
             'rgba(16, 185, 129, 0.7)',
             'rgba(16, 185, 129, 1)'
+        );
+
+        // Render Top Ports chart
+        renderAnomaliesBarChart(
+            'chart-anomalies-ports',
+            data.top_ports.map(x => x.port.toString() + (x.port_name ? ` (${x.port_name})` : '')),
+            data.top_ports.map(x => x.bytes),
+            '連接埠流量 (Bytes)',
+            'rgba(99, 102, 241, 0.7)',
+            'rgba(99, 102, 241, 1)'
+        );
+
+        // Render Top Protocols chart
+        renderAnomaliesBarChart(
+            'chart-anomalies-protocols',
+            data.ip_protocols.map(x => x.name),
+            data.ip_protocols.map(x => x.bytes),
+            '協定流量 (Bytes)',
+            'rgba(236, 72, 153, 0.7)',
+            'rgba(236, 72, 153, 1)'
         );
     } catch (err) {
         console.error('Error fetching anomalous report stats:', err);

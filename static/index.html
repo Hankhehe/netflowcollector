@@ -419,6 +419,32 @@
                             <canvas id="chart-anomalies-destinations"></canvas>
                         </div>
                     </div>
+
+                    <!-- Top Ports Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                                <i data-lucide="hash" style="color: var(--color-info); width: 20px; height: 20px;"></i>
+                                <span>熱門異常連接埠 Top Anomalous Ports</span>
+                            </h3>
+                        </div>
+                        <div class="card-body chart-container" style="padding: 24px;">
+                            <canvas id="chart-anomalies-ports"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- IP Protocols Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                                <i data-lucide="activity" style="color: var(--color-success); width: 20px; height: 20px;"></i>
+                                <span>異常協定分佈 Top Anomalous Protocols</span>
+                            </h3>
+                        </div>
+                        <div class="card-body chart-container" style="padding: 24px;">
+                            <canvas id="chart-anomalies-protocols"></canvas>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card table-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">

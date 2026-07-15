@@ -2016,6 +2016,20 @@ def get_audit_matches_stats(
         """, parameters=params)
         top_destination_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
+        # 5b. Top Ports (Overall union)
+        res = client.query(f"""
+            SELECT port, SUM(octets) as bytes, COUNT() as flows
+            FROM (
+                SELECT sport as port, octets FROM matched_flows {where_sql} WHERE sport IS NOT NULL
+                UNION ALL
+                SELECT dport as port, octets FROM matched_flows {where_sql} WHERE dport IS NOT NULL
+            )
+            GROUP BY port
+            ORDER BY bytes DESC
+            LIMIT 10
+        """, parameters=params)
+        top_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
         # 6. Protocols Share
         res = client.query(f"""
             SELECT proto as name, COUNT() as count, SUM(octets) as bytes
@@ -2025,6 +2039,25 @@ def get_audit_matches_stats(
             ORDER BY count DESC
         """, parameters=params)
         protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 6b. IP Protocols Share (TCP, UDP, etc.)
+        res = client.query(f"""
+            SELECT protocol as name_num, COUNT() as count, SUM(octets) as bytes
+            FROM matched_flows
+            {where_sql}
+            GROUP BY name_num
+            ORDER BY count DESC
+        """, parameters=params)
+        ip_protocols = []
+        for r in res.result_rows:
+            p_num = r[0]
+            p_name = PROTO_NAME_MAP.get(p_num, f"UNKNOWN ({p_num})" if p_num is not None else "N/A")
+            ip_protocols.append({
+                "protocol": p_num,
+                "name": p_name,
+                "count": r[1],
+                "bytes": r[2]
+            })
 
         # 7. Flags Share
         res = client.query(f"""
@@ -2087,6 +2120,9 @@ def get_audit_matches_stats(
         for item in top_destination_ports:
             dport = item.get("dport")
             item["port_name"] = port_aliases_cache.get(dport, "") if dport is not None else ""
+        for item in top_ports:
+            port = item.get("port")
+            item["port_name"] = port_aliases_cache.get(port, "") if port is not None else ""
 
         return {
             "total_flows": total_flows,
@@ -2096,7 +2132,9 @@ def get_audit_matches_stats(
             "top_destinations": top_destinations,
             "top_source_ports": top_source_ports,
             "top_destination_ports": top_destination_ports,
+            "top_ports": top_ports,
             "protocols": protocols,
+            "ip_protocols": ip_protocols,
             "flags": flags,
             "traffic_over_time": traffic_over_time
         }
