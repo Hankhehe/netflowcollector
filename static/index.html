@@ -392,6 +392,35 @@
 
             <!-- Anomalous Traffic Report View -->
             <section id="view-anomalies" class="dashboard-view" style="padding: 20px;">
+                <!-- Anomalies Analytics Charts -->
+                <div class="analytics-grid" id="anomalies-charts-grid">
+                    <!-- Top Sources Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                                <i data-lucide="arrow-up-right" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
+                                <span>熱門異常來源 Top Anomalous Sources</span>
+                            </h3>
+                        </div>
+                        <div class="card-body chart-container" style="padding: 24px;">
+                            <canvas id="chart-anomalies-sources"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Top Destinations Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                                <i data-lucide="arrow-down-left" style="color: var(--color-success); width: 20px; height: 20px;"></i>
+                                <span>熱門異常目的 Top Anomalous Destinations</span>
+                            </h3>
+                        </div>
+                        <div class="card-body chart-container" style="padding: 24px;">
+                            <canvas id="chart-anomalies-destinations"></canvas>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card table-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
                     <div class="card-header table-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">

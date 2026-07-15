@@ -1589,10 +1589,10 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
         
         if not rules:
             cur.execute("INSERT INTO audit_logs (status, records_matched, message) VALUES (?, ?, ?)", 
-                        ("success", 0, "No audit rules configured. Skip matching."))
+                        ("skipped", 0, "No audit rules configured. Skip matching."))
             conn.commit()
             conn.close()
-            return {"status": "success", "records_matched": 0, "message": "No audit rules configured."}
+            return {"status": "skipped", "records_matched": 0, "message": "No audit rules configured."}
             
         parsed_rules = parse_rule_criteria(rules)
         
@@ -1622,7 +1622,7 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
             else:
                 last_run_dt = datetime.utcnow() - timedelta(days=7)
             
-        current_run_dt = datetime.utcnow()
+        current_run_dt = datetime.now(timezone.utc)
         last_run_str = last_run_dt.strftime("%Y-%m-%d %H:%M:%S")
         current_run_str = current_run_dt.strftime("%Y-%m-%d %H:%M:%S")
         
@@ -1646,6 +1646,8 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
                 flow = dict(zip(column_names, row_vals))
                 matching_rule = check_flow_match(flow, parsed_rules)
                 if matching_rule:
+                    if isinstance(flow.get("ts"), datetime):
+                        flow["ts"] = flow["ts"].replace(tzinfo=timezone.utc)
                     flow["rule_ip"] = matching_rule["ip_raw"]
                     flow["rule_port"] = matching_rule["port_raw"]
                     flow["match_flag"] = matching_rule["flag"]
@@ -1924,6 +1926,184 @@ def get_audit_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/audit/matches/stats")
+def get_audit_matches_stats(
+    src: Optional[str] = Query(None),
+    dst: Optional[str] = Query(None),
+    sport: Optional[int] = Query(None),
+    dport: Optional[int] = Query(None),
+    port: Optional[int] = Query(None),
+    flag: Optional[str] = Query(None)
+):
+    try:
+        client = get_ch_client()
+        where_clauses = []
+        params = {}
+        
+        if src:
+            where_clauses.append("src LIKE %(src)s")
+            params["src"] = f"{src}%"
+        if dst:
+            where_clauses.append("dst LIKE %(dst)s")
+            params["dst"] = f"{dst}%"
+        if sport is not None:
+            where_clauses.append("sport = %(sport)s")
+            params["sport"] = sport
+        if dport is not None:
+            where_clauses.append("dport = %(dport)s")
+            params["dport"] = dport
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
+        if flag:
+            where_clauses.append("match_flag = %(flag)s")
+            params["flag"] = flag.strip().lower()
+            
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
+            
+        # 1. Total flows/packets/bytes
+        res = client.query(f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM matched_flows {where_sql}", parameters=params)
+        totals = dict(zip(res.column_names, res.result_rows[0]))
+        total_flows = totals["total_flows"] or 0
+        total_packets = totals["total_packets"] or 0
+        total_bytes = totals["total_bytes"] or 0
+
+        # 2. Top Sources
+        res = client.query(f"""
+            SELECT src, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            GROUP BY src
+            ORDER BY bytes DESC
+            LIMIT 10
+        """, parameters=params)
+        top_sources = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 3. Top Destinations
+        res = client.query(f"""
+            SELECT dst, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            GROUP BY dst
+            ORDER BY bytes DESC
+            LIMIT 10
+        """, parameters=params)
+        top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 4. Top Source Ports
+        res = client.query(f"""
+            SELECT sport, SUM(octets) as bytes, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            WHERE sport IS NOT NULL
+            GROUP BY sport
+            ORDER BY bytes DESC
+            LIMIT 10
+        """, parameters=params)
+        top_source_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 5. Top Destination Ports
+        res = client.query(f"""
+            SELECT dport, SUM(octets) as bytes, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            WHERE dport IS NOT NULL
+            GROUP BY dport
+            ORDER BY bytes DESC
+            LIMIT 10
+        """, parameters=params)
+        top_destination_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 6. Protocols Share
+        res = client.query(f"""
+            SELECT proto as name, COUNT() as count, SUM(octets) as bytes
+            FROM matched_flows
+            {where_sql}
+            GROUP BY name
+            ORDER BY count DESC
+        """, parameters=params)
+        protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 7. Flags Share
+        res = client.query(f"""
+            SELECT match_flag as name, COUNT() as count, SUM(octets) as bytes
+            FROM matched_flows
+            {where_sql}
+            GROUP BY name
+            ORDER BY count DESC
+        """, parameters=params)
+        flags = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 8. Traffic over time
+        range_res = client.query(f"SELECT min(ts), max(ts) FROM matched_flows {where_sql}", parameters=params)
+        min_ts, max_ts = range_res.result_rows[0]
+        
+        time_format = "%Y-%m-%d"
+        ch_group_fn = "toStartOfDay(ts + INTERVAL 8 HOUR)"
+        if min_ts and max_ts:
+            diff_secs = (max_ts - min_ts).total_seconds()
+            if diff_secs < 172800: # < 48 hours
+                time_format = "%Y-%m-%d %H:00"
+                ch_group_fn = "toStartOfHour(ts + INTERVAL 8 HOUR)"
+                
+        res = client.query(f"""
+            SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            GROUP BY time_bin
+            ORDER BY time_bin ASC
+        """, parameters=params)
+        
+        traffic_over_time = []
+        for r_row in res.result_rows:
+            r = dict(zip(res.column_names, r_row))
+            tb = r["time_bin"]
+            if isinstance(tb, datetime):
+                r["time_bin"] = tb.strftime(time_format)
+            traffic_over_time.append(r)
+
+        # Resolve IPs
+        stats_ips = set()
+        for item in top_sources:
+            if item.get("src"):
+                stats_ips.add(item["src"])
+        for item in top_destinations:
+            if item.get("dst"):
+                stats_ips.add(item["dst"])
+        stats_dns_map = get_dns_mappings(stats_ips)
+        for item in top_sources:
+            ip = item.get("src")
+            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+        for item in top_destinations:
+            ip = item.get("dst")
+            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+
+        # Resolve Ports
+        for item in top_source_ports:
+            sport = item.get("sport")
+            item["port_name"] = port_aliases_cache.get(sport, "") if sport is not None else ""
+        for item in top_destination_ports:
+            dport = item.get("dport")
+            item["port_name"] = port_aliases_cache.get(dport, "") if dport is not None else ""
+
+        return {
+            "total_flows": total_flows,
+            "total_packets": total_packets,
+            "total_bytes": total_bytes,
+            "top_sources": top_sources,
+            "top_destinations": top_destinations,
+            "top_source_ports": top_source_ports,
+            "top_destination_ports": top_destination_ports,
+            "protocols": protocols,
+            "flags": flags,
+            "traffic_over_time": traffic_over_time
+        }
+    except Exception as e:
+        reset_ch_client()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/audit/matches")
 def get_audit_matches(
     limit: int = Query(50, ge=1, le=1000),
@@ -2012,6 +2192,10 @@ def get_audit_matches(
             r["dst_domain"] = ip_aliases_cache.get(r.get("dst"), dns_map.get(r.get("dst"), ""))
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
+            if r.get("protocol") is not None:
+                r["proto_name"] = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})")
+            else:
+                r["proto_name"] = "N/A"
             
         return {
             "total": total_records,
@@ -2144,11 +2328,12 @@ def export_audit_matches(
                 sport_name = port_aliases_cache.get(sport_val, "")
                 dport_name = port_aliases_cache.get(dport_val, "")
                 
+                p_name = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})" if r["protocol"] is not None else "N/A")
                 row_data = [
                     m_ts, f_ts, flag_val, r["rule_ip"] or "(任意)", r["rule_port"] or "(任意)",
                     src_ip, src_domain, sport_val, sport_name,
                     dst_ip, dst_domain, dport_val, dport_name,
-                    r["proto"], r["packets"], r["octets"]
+                    p_name, r["packets"], r["octets"]
                 ]
                 writer.writerow(row_data)
                 yield output.getvalue()

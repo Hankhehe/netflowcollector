@@ -2586,6 +2586,7 @@ async function fetchAnomalousReport() {
         
         renderAnomalousReportTable(data.records);
         renderAnomaliesPagination(data.total);
+        fetchAnomalousReportStats();
     } catch (err) {
         console.error('Error fetching anomalous reports:', err);
         const tbody = els.anomaliesTbody;
@@ -2778,4 +2779,108 @@ function showAuditTriggerStatus(message, type) {
     setTimeout(() => {
         el.style.display = 'none';
     }, 5000);
+}
+
+// Fetch statistics for anomalous report view and render the two bar charts
+async function fetchAnomalousReportStats() {
+    let url = `/api/audit/matches/stats?`;
+    if (state.anomaliesFilters.src) url += `&src=${encodeURIComponent(state.anomaliesFilters.src)}`;
+    if (state.anomaliesFilters.dst) url += `&dst=${encodeURIComponent(state.anomaliesFilters.dst)}`;
+    if (state.anomaliesFilters.port) url += `&port=${encodeURIComponent(state.anomaliesFilters.port)}`;
+    if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch stats');
+        const data = await response.json();
+
+        // Render Top Sources chart
+        renderAnomaliesBarChart(
+            'chart-anomalies-sources',
+            data.top_sources.map(x => x.src + (x.domain ? ` (${x.domain})` : '')),
+            data.top_sources.map(x => x.bytes),
+            '來源流量 (Bytes)',
+            'rgba(245, 158, 11, 0.7)',
+            'rgba(245, 158, 11, 1)'
+        );
+
+        // Render Top Destinations chart
+        renderAnomaliesBarChart(
+            'chart-anomalies-destinations',
+            data.top_destinations.map(x => x.dst + (x.domain ? ` (${x.domain})` : '')),
+            data.top_destinations.map(x => x.bytes),
+            '目的流量 (Bytes)',
+            'rgba(16, 185, 129, 0.7)',
+            'rgba(16, 185, 129, 1)'
+        );
+    } catch (err) {
+        console.error('Error fetching anomalous report stats:', err);
+    }
+}
+
+// Render Anomalous Bar Chart helper
+function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderColor) {
+    destroyChart(canvasId);
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    state.charts[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: label,
+                data: data,
+                backgroundColor: bgColor,
+                borderColor: borderColor,
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: '#1f2937',
+                    titleColor: '#f3f4f6',
+                    bodyColor: '#d1d5db',
+                    borderColor: '#374151',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            return ` ${context.dataset.label}: ${formatBytes(context.parsed.y)}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)'
+                    },
+                    ticks: {
+                        color: '#9ca3af',
+                        font: {
+                            size: 10
+                        }
+                    }
+                },
+                y: {
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)'
+                    },
+                    ticks: {
+                        color: '#9ca3af',
+                        callback: function(value) {
+                            return formatBytes(value);
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
