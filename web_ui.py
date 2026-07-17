@@ -1207,11 +1207,19 @@ def get_stats(
         # Get DNS mapping
         stats_dns_map = get_dns_mappings(stats_ips)
         
-        # Attach resolved domains
+        # Attach resolved domains and aliases
         for item in top_sources:
-            item["domain"] = stats_dns_map.get(item.get("src"), "")
+            ip = item.get("src")
+            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
         for item in top_destinations:
-            item["domain"] = stats_dns_map.get(item.get("dst"), "")
+            ip = item.get("dst")
+            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+
+        # Attach port aliases
+        for item in top_source_ports:
+            item["port_name"] = port_aliases_cache.get(item.get("sport"), "") if item.get("sport") is not None else ""
+        for item in top_destination_ports:
+            item["port_name"] = port_aliases_cache.get(item.get("dport"), "") if item.get("dport") is not None else ""
 
         return {
             "total_flows": total_flows,
@@ -1746,6 +1754,9 @@ def get_audit_rules():
         cur.execute("SELECT id, ip, port, flag, created_at FROM audit_rules ORDER BY id DESC")
         rules = [dict(row) for row in cur.fetchall()]
         conn.close()
+        for rule in rules:
+            ip = rule.get("ip")
+            rule["ip_alias"] = ip_aliases_cache.get(ip, "") if ip else ""
         return rules
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2230,6 +2241,8 @@ def get_audit_matches(
             r["dst_domain"] = ip_aliases_cache.get(r.get("dst"), dns_map.get(r.get("dst"), ""))
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
+            rule_ip = r.get("rule_ip")
+            r["rule_ip_alias"] = ip_aliases_cache.get(rule_ip, "") if rule_ip else ""
             if r.get("protocol") is not None:
                 r["proto_name"] = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})")
             else:

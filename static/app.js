@@ -2,7 +2,7 @@
 
 // State management
 let state = {
-    activeTab: 'explorer', // 'explorer' or 'analytics'
+    activeTab: 'anomalies', // 'explorer', 'analytics' or 'anomalies'
     filters: {
         table: 'all',
         exporter: '',
@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchExporterDropdown();
     fetchPortAliases();
     fetchIpAliases();
-    refreshData();
+    switchTab('anomalies');
 });
 
 // Setup Event Listeners
@@ -1206,8 +1206,8 @@ async function fetchStats() {
         renderTimeChart(data.traffic_over_time);
         renderBarChart('chart-top-sources', 'Top Sources', data.top_sources.map(x => formatChartIPLabel(x.src, x.domain)), data.top_sources.map(x => x.bytes));
         renderBarChart('chart-top-destinations', 'Top Destinations', data.top_destinations.map(x => formatChartIPLabel(x.dst, x.domain)), data.top_destinations.map(x => x.bytes));
-        renderBarChart('chart-top-src-ports', 'Top 10 Source Ports', data.top_source_ports.map(x => x.sport.toString()), data.top_source_ports.map(x => x.bytes));
-        renderBarChart('chart-top-dst-ports', 'Top 10 Destination Ports', data.top_destination_ports.map(x => x.dport.toString()), data.top_destination_ports.map(x => x.bytes));
+        renderBarChart('chart-top-src-ports', 'Top 10 Source Ports', data.top_source_ports.map(x => x.sport.toString() + (x.port_name ? ` (${x.port_name})` : '')), data.top_source_ports.map(x => x.bytes));
+        renderBarChart('chart-top-dst-ports', 'Top 10 Destination Ports', data.top_destination_ports.map(x => x.dport.toString() + (x.port_name ? ` (${x.port_name})` : '')), data.top_destination_ports.map(x => x.bytes));
         renderDoughnutChart('chart-protocols', data.protocols.map(x => x.name), data.protocols.map(x => x.count));
         renderDoughnutChart('chart-exporters', data.top_exporters.map(x => x.exporter), data.top_exporters.map(x => x.flows));
         
@@ -2222,7 +2222,8 @@ async function fetchAuditRules() {
         }
         
         tbody.innerHTML = rules.map(rule => {
-            const ipDisplay = rule.ip || '<span class="text-muted">(任意)</span>';
+            const ipAliasSub = rule.ip_alias ? `<div class="domain-subtext" style="font-size: 0.75rem; color: var(--text-muted);">${rule.ip_alias}</div>` : '';
+            const ipDisplay = rule.ip ? `<div>${rule.ip}</div>${ipAliasSub}` : '<span class="text-muted">(任意)</span>';
             const portDisplay = rule.port || '<span class="text-muted">(任意)</span>';
             const badgeClass = rule.flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
             const flagText = rule.flag === 'watch' ? '關注' : '異常';
@@ -2418,7 +2419,10 @@ function renderAuditMatches(records) {
                 <td style="padding: 10px 12px; text-align: center;">
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_ip || '(任意)'}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
+                    <div>${r.rule_ip || '(任意)'}</div>
+                    ${r.rule_ip_alias ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">
                     <div>${r.src}</div>
@@ -2626,7 +2630,10 @@ function renderAnomalousReportTable(records) {
                 <td style="padding: 10px 12px; text-align: center;">
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_ip || '(任意)'}</td>
+                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
+                    <div>${r.rule_ip || '(任意)'}</div>
+                    ${r.rule_ip_alias ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">
                     <div>${r.src}</div>
@@ -2797,7 +2804,7 @@ async function fetchAnomalousReportStats() {
         // Render Top Sources chart
         renderAnomaliesBarChart(
             'chart-anomalies-sources',
-            data.top_sources.map(x => x.src + (x.domain ? ` (${x.domain})` : '')),
+            data.top_sources.map(x => formatChartIPLabel(x.src, x.domain)),
             data.top_sources.map(x => x.bytes),
             '來源流量 (Bytes)',
             'rgba(245, 158, 11, 0.7)',
@@ -2807,7 +2814,7 @@ async function fetchAnomalousReportStats() {
         // Render Top Destinations chart
         renderAnomaliesBarChart(
             'chart-anomalies-destinations',
-            data.top_destinations.map(x => x.dst + (x.domain ? ` (${x.domain})` : '')),
+            data.top_destinations.map(x => formatChartIPLabel(x.dst, x.domain)),
             data.top_destinations.map(x => x.bytes),
             '目的流量 (Bytes)',
             'rgba(16, 185, 129, 0.7)',
