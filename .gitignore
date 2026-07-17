@@ -18,3 +18,6 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Large files
+ipinfo_lite.csv

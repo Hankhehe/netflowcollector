@@ -693,7 +693,7 @@ body {
 .chart-container {
     position: relative;
     width: 100%;
-    min-height: 280px;
+    height: 280px;
 }
 
 .flex-center {

@@ -28,6 +28,12 @@ let state = {
         offset: 0,
         total: 0
     },
+    ipAliasesPagination: {
+        limit: 25,
+        offset: 0,
+        total: 0,
+        search: ''
+    },
     auditFilters: {
         src: '',
         dst: '',
@@ -727,6 +733,37 @@ function setupEventListeners() {
             } catch (err) {
                 showIpAliasStatus(`Clear failed: ${err.message}`, 'error');
             }
+        });
+    }
+
+    // IP aliases search
+    const searchInput = document.getElementById('input-search-ip-aliases');
+    if (searchInput) {
+        let timeout = null;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                state.ipAliasesPagination.search = searchInput.value;
+                state.ipAliasesPagination.offset = 0;
+                fetchIpAliases();
+            }, 300);
+        });
+    }
+
+    // IP aliases pagination clicks
+    const btnIpPrev = document.getElementById('btn-ip-aliases-prev');
+    if (btnIpPrev) {
+        btnIpPrev.addEventListener('click', () => {
+            state.ipAliasesPagination.offset = Math.max(0, state.ipAliasesPagination.offset - state.ipAliasesPagination.limit);
+            fetchIpAliases();
+        });
+    }
+
+    const btnIpNext = document.getElementById('btn-ip-aliases-next');
+    if (btnIpNext) {
+        btnIpNext.addEventListener('click', () => {
+            state.ipAliasesPagination.offset += state.ipAliasesPagination.limit;
+            fetchIpAliases();
         });
     }
 }
@@ -2004,12 +2041,24 @@ async function fetchIpAliases() {
         </tr>
     `;
 
+    const limit = state.ipAliasesPagination.limit;
+    const offset = state.ipAliasesPagination.offset;
+    const q = state.ipAliasesPagination.search;
+    
+    let url = `/api/ips/aliases?limit=${limit}&offset=${offset}`;
+    if (q) {
+        url += `&q=${encodeURIComponent(q)}`;
+    }
+
     try {
-        const res = await fetch('/api/ips/aliases');
+        const res = await fetch(url);
         if (!res.ok) throw new Error('Failed to fetch IP aliases');
-        const list = await res.json();
+        const data = await res.json();
         
-        renderIpAliasesTable(list);
+        state.ipAliasesPagination.total = data.total;
+        
+        renderIpAliasesTable(data.records);
+        renderIpAliasesPagination(data.total);
     } catch (err) {
         tbody.innerHTML = `
             <tr>
@@ -2019,6 +2068,24 @@ async function fetchIpAliases() {
             </tr>
         `;
     }
+}
+
+function renderIpAliasesPagination(total) {
+    const info = document.getElementById('ip-aliases-pagination-info');
+    const btnPrev = document.getElementById('btn-ip-aliases-prev');
+    const btnNext = document.getElementById('btn-ip-aliases-next');
+    if (!info || !btnPrev || !btnNext) return;
+    
+    const limit = state.ipAliasesPagination.limit;
+    const offset = state.ipAliasesPagination.offset;
+    
+    const start = total === 0 ? 0 : offset + 1;
+    const end = Math.min(total, offset + limit);
+    
+    info.innerText = `顯示第 ${start} 到 ${end} 筆，共 ${total} 筆`;
+    
+    btnPrev.disabled = (offset === 0);
+    btnNext.disabled = (end >= total);
 }
 
 // Render the IP Aliases table rows

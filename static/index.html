@@ -616,6 +616,10 @@
                                     <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">Save</button>
                                 </form>
 
+                                <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+                                    <input type="text" id="input-search-ip-aliases" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.85rem;" placeholder="搜尋 IP 網段或別名名稱...">
+                                </div>
+
                                 <div style="max-height: 230px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
                                     <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                         <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
@@ -629,6 +633,14 @@
                                             <!-- Populated via Javascript -->
                                         </tbody>
                                     </table>
+                                </div>
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.8rem; color: var(--text-secondary);">
+                                    <span id="ip-aliases-pagination-info">顯示第 0 到 0 筆，共 0 筆</span>
+                                    <div style="display: flex; gap: 6px;">
+                                        <button id="btn-ip-aliases-prev" class="btn btn-secondary btn-sm" style="padding: 2px 8px; border-radius: 4px;">&laquo; 上一頁</button>
+                                        <button id="btn-ip-aliases-next" class="btn btn-secondary btn-sm" style="padding: 2px 8px; border-radius: 4px;">下一頁 &raquo;</button>
+                                    </div>
                                 </div>
                                 <div id="ip-alias-status-message" style="margin-top: 15px; padding: 10px 14px; border-radius: 6px; display: none; font-size: 0.82rem;"></div>
                             </div>

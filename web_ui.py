@@ -8,7 +8,7 @@ import ipaddress
 import time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterable
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -180,7 +180,11 @@ def get_db_connection():
 
 port_aliases_cache = {}
 ip_aliases_cache = {}
-ip_cidr_aliases = [] # list of (IPv4Network/IPv6Network, alias_name)
+
+def ip_to_hex(ip_obj) -> str:
+    if ip_obj.version == 4:
+        return 'v4-' + ip_obj.packed.hex()
+    return 'v6-' + ip_obj.packed.hex()
 
 def load_port_aliases():
     global port_aliases_cache
@@ -195,35 +199,17 @@ def load_port_aliases():
         print(f"[Startup Init] Error loading port aliases into cache: {e}")
 
 def load_ip_aliases():
-    global ip_aliases_cache, ip_cidr_aliases
+    global ip_aliases_cache
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT ip, name FROM ip_aliases")
+        # Only load exact IP matches into memory cache to save memory
+        cur.execute("SELECT ip, name FROM ip_aliases WHERE ip NOT LIKE '%/%'")
         rows = cur.fetchall()
         conn.close()
         
-        # Reset cache and list
-        ip_aliases_cache = {}
-        ip_cidr_aliases = []
-        
-        for row in rows:
-            ip_str = row[0].strip()
-            name = row[1].strip()
-            ip_aliases_cache[ip_str] = name
-            
-            # Check if it is a CIDR block
-            if "/" in ip_str:
-                try:
-                    net = ipaddress.ip_network(ip_str, strict=False)
-                    ip_cidr_aliases.append((net, name))
-                except ValueError:
-                    pass
-                    
-        # Sort CIDR aliases by prefix length descending (longest prefix match first)
-        ip_cidr_aliases.sort(key=lambda x: x[0].prefixlen, reverse=True)
-        
-        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} IP aliases ({len(ip_cidr_aliases)} CIDR blocks) into cache.")
+        ip_aliases_cache = {row[0].strip(): row[1].strip() for row in rows}
+        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} exact IP aliases into cache.")
     except Exception as e:
         print(f"[Startup Init] Error loading IP aliases into cache: {e}")
 
@@ -232,20 +218,78 @@ def resolve_ip_alias(ip_str: str) -> Optional[str]:
         return None
     ip_str = ip_str.strip()
     
-    # 1. Exact match first (handles exact IP or exact CIDR match)
+    # 1. Exact match first
     if ip_str in ip_aliases_cache:
         return ip_aliases_cache[ip_str]
         
-    # 2. CIDR match (longest prefix match first since it is sorted)
+    # 2. CIDR range match from SQLite
     try:
         ip_obj = ipaddress.ip_address(ip_str)
-        for net, name in ip_cidr_aliases:
-            if ip_obj in net:
-                return name
-    except ValueError:
+        ip_hex = ip_to_hex(ip_obj)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT name FROM ip_aliases 
+            WHERE start_ip <= ? AND end_ip >= ? 
+            ORDER BY prefix_len DESC LIMIT 1
+        """, (ip_hex, ip_hex))
+        row = cur.fetchone()
+        conn.close()
+        
+        alias = row[0] if row else None
+        if alias:
+            # Cache resolved IP for future O(1) lookups
+            ip_aliases_cache[ip_str] = alias
+        return alias
+    except Exception:
         pass
         
     return None
+
+def resolve_ip_aliases_batch(ips_list: Iterable[str]) -> Dict[str, str]:
+    results = {}
+    missing_ips = []
+    
+    for ip in ips_list:
+        if not ip:
+            continue
+        ip_clean = ip.strip()
+        if ip_clean in ip_aliases_cache:
+            results[ip_clean] = ip_aliases_cache[ip_clean]
+        else:
+            missing_ips.append(ip_clean)
+            
+    if not missing_ips:
+        return results
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        for ip in missing_ips:
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+                ip_hex = ip_to_hex(ip_obj)
+                
+                cur.execute("""
+                    SELECT name FROM ip_aliases 
+                    WHERE start_ip <= ? AND end_ip >= ? 
+                    ORDER BY prefix_len DESC LIMIT 1
+                """, (ip_hex, ip_hex))
+                row = cur.fetchone()
+                if row:
+                    alias = row[0]
+                    results[ip] = alias
+                    ip_aliases_cache[ip] = alias  # Cache it
+            except Exception:
+                pass
+                
+        conn.close()
+    except Exception as e:
+        print(f"Error in batch resolve: {e}")
+        
+    return results
 
 def init_db():
     """Verify that tables exist, run auto-migration for missing columns, and create indexes on startup."""
@@ -303,8 +347,12 @@ def init_db():
         # Initialize ip aliases table
         cur.execute("""CREATE TABLE IF NOT EXISTS ip_aliases (
             ip TEXT PRIMARY KEY,
-            name TEXT NOT NULL
+            name TEXT NOT NULL,
+            start_ip TEXT,
+            end_ip TEXT,
+            prefix_len INTEGER
         )""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ip_aliases_range ON ip_aliases (start_ip, end_ip, prefix_len)")
         
         # Initialize audit rules table
         cur.execute("""CREATE TABLE IF NOT EXISTS audit_rules (
@@ -686,15 +734,16 @@ def get_flows(
             if r.get("dst"):
                 ips_to_resolve.add(r["dst"])
         
-        # Get DNS mappings
+        # Get DNS and IP Aliases mappings in batch
         dns_map = get_dns_mappings(ips_to_resolve)
+        alias_map = resolve_ip_aliases_batch(ips_to_resolve)
         
         # Attach domains to records (IP alias takes priority over DNS cache resolved domain)
         for r in records:
             src_ip = r.get("src")
             dst_ip = r.get("dst")
-            r["src_domain"] = resolve_ip_alias(src_ip) or dns_map.get(src_ip, "")
-            r["dst_domain"] = resolve_ip_alias(dst_ip) or dns_map.get(dst_ip, "")
+            r["src_domain"] = alias_map.get(src_ip) or dns_map.get(src_ip, "")
+            r["dst_domain"] = alias_map.get(dst_ip) or dns_map.get(dst_ip, "")
 
         return {
             "total": total_count,
@@ -1246,16 +1295,17 @@ def get_stats(
             if item.get("dst"):
                 stats_ips.add(item["dst"])
         
-        # Get DNS mapping
+        # Get DNS and IP Aliases mappings in batch
         stats_dns_map = get_dns_mappings(stats_ips)
+        alias_map = resolve_ip_aliases_batch(stats_ips)
         
         # Attach resolved domains and aliases
         for item in top_sources:
             ip = item.get("src")
-            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
+            item["domain"] = alias_map.get(ip) or stats_dns_map.get(ip, "")
         for item in top_destinations:
             ip = item.get("dst")
-            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
+            item["domain"] = alias_map.get(ip) or stats_dns_map.get(ip, "")
 
         # Attach port aliases
         for item in top_source_ports:
@@ -1350,15 +1400,37 @@ def delete_port_alias(port: int):
 
 
 @app.get("/api/ips/aliases")
-def get_ip_aliases():
+def get_ip_aliases(
+    limit: int = Query(25, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None)
+):
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT ip, name FROM ip_aliases ORDER BY ip ASC")
+        
+        where_clause = ""
+        params = []
+        if q:
+            q_clean = f"%{q.strip()}%"
+            where_clause = "WHERE ip LIKE ? OR name LIKE ?"
+            params = [q_clean, q_clean]
+            
+        cur.execute(f"SELECT COUNT(*) FROM ip_aliases {where_clause}", params)
+        total_count = cur.fetchone()[0]
+        
+        params.extend([limit, offset])
+        cur.execute(f"SELECT ip, name FROM ip_aliases {where_clause} ORDER BY ip ASC LIMIT ? OFFSET ?", params)
         rows = cur.fetchall()
         conn.close()
-        return [{"ip": r["ip"], "name": r["name"]} for r in rows]
+        
+        return {
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "records": [{"ip": r["ip"], "name": r["name"]} for r in rows]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1371,7 +1443,23 @@ def set_ip_alias(ip: str, name: str):
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name) VALUES (?, ?)", (ip, name))
+        start_ip, end_ip, prefix_len = None, None, None
+        try:
+            if "/" in ip:
+                net = ipaddress.ip_network(ip, strict=False)
+                start_ip = ip_to_hex(net.network_address)
+                end_ip = ip_to_hex(net.broadcast_address)
+                prefix_len = net.prefixlen
+            else:
+                ip_obj = ipaddress.ip_address(ip)
+                start_ip = ip_to_hex(ip_obj)
+                end_ip = start_ip
+                prefix_len = 32 if ip_obj.version == 4 else 128
+        except Exception:
+            pass
+            
+        cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name, start_ip, end_ip, prefix_len) VALUES (?, ?, ?, ?, ?)",
+                    (ip, name, start_ip, end_ip, prefix_len))
         conn.commit()
         conn.close()
         load_ip_aliases() # Refresh cache
@@ -1441,7 +1529,22 @@ def import_aliases(payload: Dict[str, Any]):
             ip = str(ip).strip()
             name = str(name).strip()
             if ip and name:
-                cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name) VALUES (?, ?)", (ip, name))
+                start_ip, end_ip, prefix_len = None, None, None
+                try:
+                    if "/" in ip:
+                        net = ipaddress.ip_network(ip, strict=False)
+                        start_ip = ip_to_hex(net.network_address)
+                        end_ip = ip_to_hex(net.broadcast_address)
+                        prefix_len = net.prefixlen
+                    else:
+                        ip_obj = ipaddress.ip_address(ip)
+                        start_ip = ip_to_hex(ip_obj)
+                        end_ip = start_ip
+                        prefix_len = 32 if ip_obj.version == 4 else 128
+                except Exception:
+                    pass
+                cur.execute("INSERT OR REPLACE INTO ip_aliases (ip, name, start_ip, end_ip, prefix_len) VALUES (?, ?, ?, ?, ?)",
+                            (ip, name, start_ip, end_ip, prefix_len))
                 imported_ips += 1
                 
         # Insert Port aliases
@@ -2158,13 +2261,15 @@ def get_audit_matches_stats(
         for item in top_destinations:
             if item.get("dst"):
                 stats_ips.add(item["dst"])
+        # Get DNS and IP Aliases mappings in batch
         stats_dns_map = get_dns_mappings(stats_ips)
+        alias_map = resolve_ip_aliases_batch(stats_ips)
         for item in top_sources:
             ip = item.get("src")
-            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
+            item["domain"] = alias_map.get(ip) or stats_dns_map.get(ip, "")
         for item in top_destinations:
             ip = item.get("dst")
-            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
+            item["domain"] = alias_map.get(ip) or stats_dns_map.get(ip, "")
 
         # Resolve Ports
         for item in top_source_ports:
@@ -2277,10 +2382,14 @@ def get_audit_matches(
             if r.get("dst"):
                 ips_to_resolve.add(r["dst"])
                 
+        # Get DNS and IP Aliases mappings in batch
         dns_map = get_dns_mappings(ips_to_resolve)
+        alias_map = resolve_ip_aliases_batch(ips_to_resolve)
         for r in records:
-            r["src_domain"] = resolve_ip_alias(r.get("src")) or dns_map.get(r.get("src"), "")
-            r["dst_domain"] = resolve_ip_alias(r.get("dst")) or dns_map.get(r.get("dst"), "")
+            src_ip = r.get("src")
+            dst_ip = r.get("dst")
+            r["src_domain"] = alias_map.get(src_ip) or dns_map.get(src_ip, "")
+            r["dst_domain"] = alias_map.get(dst_ip) or dns_map.get(dst_ip, "")
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
             rule_ip = r.get("rule_ip")
