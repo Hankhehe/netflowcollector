@@ -180,6 +180,7 @@ def get_db_connection():
 
 port_aliases_cache = {}
 ip_aliases_cache = {}
+ip_cidr_aliases = [] # list of (IPv4Network/IPv6Network, alias_name)
 
 def load_port_aliases():
     global port_aliases_cache
@@ -194,16 +195,57 @@ def load_port_aliases():
         print(f"[Startup Init] Error loading port aliases into cache: {e}")
 
 def load_ip_aliases():
-    global ip_aliases_cache
+    global ip_aliases_cache, ip_cidr_aliases
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute("SELECT ip, name FROM ip_aliases")
-        ip_aliases_cache = {row[0]: row[1] for row in cur.fetchall()}
+        rows = cur.fetchall()
         conn.close()
-        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} IP aliases into cache.")
+        
+        # Reset cache and list
+        ip_aliases_cache = {}
+        ip_cidr_aliases = []
+        
+        for row in rows:
+            ip_str = row[0].strip()
+            name = row[1].strip()
+            ip_aliases_cache[ip_str] = name
+            
+            # Check if it is a CIDR block
+            if "/" in ip_str:
+                try:
+                    net = ipaddress.ip_network(ip_str, strict=False)
+                    ip_cidr_aliases.append((net, name))
+                except ValueError:
+                    pass
+                    
+        # Sort CIDR aliases by prefix length descending (longest prefix match first)
+        ip_cidr_aliases.sort(key=lambda x: x[0].prefixlen, reverse=True)
+        
+        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} IP aliases ({len(ip_cidr_aliases)} CIDR blocks) into cache.")
     except Exception as e:
         print(f"[Startup Init] Error loading IP aliases into cache: {e}")
+
+def resolve_ip_alias(ip_str: str) -> Optional[str]:
+    if not ip_str:
+        return None
+    ip_str = ip_str.strip()
+    
+    # 1. Exact match first (handles exact IP or exact CIDR match)
+    if ip_str in ip_aliases_cache:
+        return ip_aliases_cache[ip_str]
+        
+    # 2. CIDR match (longest prefix match first since it is sorted)
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        for net, name in ip_cidr_aliases:
+            if ip_obj in net:
+                return name
+    except ValueError:
+        pass
+        
+    return None
 
 def init_db():
     """Verify that tables exist, run auto-migration for missing columns, and create indexes on startup."""
@@ -651,8 +693,8 @@ def get_flows(
         for r in records:
             src_ip = r.get("src")
             dst_ip = r.get("dst")
-            r["src_domain"] = ip_aliases_cache.get(src_ip, dns_map.get(src_ip, ""))
-            r["dst_domain"] = ip_aliases_cache.get(dst_ip, dns_map.get(dst_ip, ""))
+            r["src_domain"] = resolve_ip_alias(src_ip) or dns_map.get(src_ip, "")
+            r["dst_domain"] = resolve_ip_alias(dst_ip) or dns_map.get(dst_ip, "")
 
         return {
             "total": total_count,
@@ -933,9 +975,9 @@ def export_flows(
                 
                 # Add domain names (IP alias takes priority over DNS cache resolved domain)
                 if "src" in r:
-                    csv_row.append(ip_aliases_cache.get(r["src"], dns_map.get(r["src"], "")))
+                    csv_row.append(resolve_ip_alias(r["src"]) or dns_map.get(r["src"], ""))
                 if "dst" in r:
-                    csv_row.append(ip_aliases_cache.get(r["dst"], dns_map.get(r["dst"], "")))
+                    csv_row.append(resolve_ip_alias(r["dst"]) or dns_map.get(r["dst"], ""))
                 
                 # Add port names
                 if "sport" in r:
@@ -1210,10 +1252,10 @@ def get_stats(
         # Attach resolved domains and aliases
         for item in top_sources:
             ip = item.get("src")
-            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
         for item in top_destinations:
             ip = item.get("dst")
-            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
 
         # Attach port aliases
         for item in top_source_ports:
@@ -1337,7 +1379,7 @@ def set_ip_alias(ip: str, name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/ips/aliases/{ip}")
+@app.delete("/api/ips/aliases/{ip:path}")
 def delete_ip_alias(ip: str):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1756,7 +1798,7 @@ def get_audit_rules():
         conn.close()
         for rule in rules:
             ip = rule.get("ip")
-            rule["ip_alias"] = ip_aliases_cache.get(ip, "") if ip else ""
+            rule["ip_alias"] = resolve_ip_alias(ip) if ip else ""
         return rules
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2119,10 +2161,10 @@ def get_audit_matches_stats(
         stats_dns_map = get_dns_mappings(stats_ips)
         for item in top_sources:
             ip = item.get("src")
-            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
         for item in top_destinations:
             ip = item.get("dst")
-            item["domain"] = ip_aliases_cache.get(ip, stats_dns_map.get(ip, ""))
+            item["domain"] = resolve_ip_alias(ip) or stats_dns_map.get(ip, "")
 
         # Resolve Ports
         for item in top_source_ports:
@@ -2237,12 +2279,12 @@ def get_audit_matches(
                 
         dns_map = get_dns_mappings(ips_to_resolve)
         for r in records:
-            r["src_domain"] = ip_aliases_cache.get(r.get("src"), dns_map.get(r.get("src"), ""))
-            r["dst_domain"] = ip_aliases_cache.get(r.get("dst"), dns_map.get(r.get("dst"), ""))
+            r["src_domain"] = resolve_ip_alias(r.get("src")) or dns_map.get(r.get("src"), "")
+            r["dst_domain"] = resolve_ip_alias(r.get("dst")) or dns_map.get(r.get("dst"), "")
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
             rule_ip = r.get("rule_ip")
-            r["rule_ip_alias"] = ip_aliases_cache.get(rule_ip, "") if rule_ip else ""
+            r["rule_ip_alias"] = resolve_ip_alias(rule_ip) if rule_ip else ""
             if r.get("protocol") is not None:
                 r["proto_name"] = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})")
             else:
@@ -2371,8 +2413,8 @@ def export_audit_matches(
                 # DNS and Aliases resolution
                 src_ip = r["src"]
                 dst_ip = r["dst"]
-                src_domain = ip_aliases_cache.get(src_ip, dns_map.get(src_ip, ""))
-                dst_domain = ip_aliases_cache.get(dst_ip, dns_map.get(dst_ip, ""))
+                src_domain = resolve_ip_alias(src_ip) or dns_map.get(src_ip, "")
+                dst_domain = resolve_ip_alias(dst_ip) or dns_map.get(dst_ip, "")
                 
                 sport_val = r["sport"]
                 dport_val = r["dport"]
@@ -2380,8 +2422,9 @@ def export_audit_matches(
                 dport_name = port_aliases_cache.get(dport_val, "")
                 
                 p_name = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})" if r["protocol"] is not None else "N/A")
+                rule_ip_val = f"{r['rule_ip']} ({resolve_ip_alias(r['rule_ip'])})" if r['rule_ip'] and resolve_ip_alias(r['rule_ip']) else (r['rule_ip'] or "(任意)")
                 row_data = [
-                    m_ts, f_ts, flag_val, r["rule_ip"] or "(任意)", r["rule_port"] or "(任意)",
+                    m_ts, f_ts, flag_val, rule_ip_val, r["rule_port"] or "(任意)",
                     src_ip, src_domain, sport_val, sport_name,
                     dst_ip, dst_domain, dport_val, dport_name,
                     p_name, r["packets"], r["octets"]
