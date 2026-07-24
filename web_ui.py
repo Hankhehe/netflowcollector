@@ -1657,7 +1657,7 @@ INTRANET_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8")
 ]
 
-def is_internal_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def is_internal_ip(ip_obj) -> bool:
     for net in INTRANET_NETWORKS:
         if ip_obj in net:
             return True
