@@ -181,14 +181,26 @@
                             
                             <!-- Source IP -->
                             <div class="form-group">
-                                <label for="filter-src">Source IP (Prefix)</label>
-                                <input type="text" id="filter-src" class="form-control form-control-sm" placeholder="e.g. 192.168.">
+                                <label for="filter-src-type">Source IP Type</label>
+                                <select id="filter-src-type" class="form-control form-control-sm select-dark">
+                                    <option value="">Any IP (任意)</option>
+                                    <option value="internal">Private IP</option>
+                                    <option value="external">Public IP</option>
+                                    <option value="custom">Custom (自訂前綴)</option>
+                                </select>
+                                <input type="text" id="filter-src" class="form-control form-control-sm" placeholder="e.g. 192.168." style="margin-top: 6px; display: none;">
                             </div>
                             
                             <!-- Destination IP -->
                             <div class="form-group">
-                                <label for="filter-dst">Destination IP (Prefix)</label>
-                                <input type="text" id="filter-dst" class="form-control form-control-sm" placeholder="e.g. 10.0.0.">
+                                <label for="filter-dst-type">Destination IP Type</label>
+                                <select id="filter-dst-type" class="form-control form-control-sm select-dark">
+                                    <option value="">Any IP (任意)</option>
+                                    <option value="internal">Private IP</option>
+                                    <option value="external">Public IP</option>
+                                    <option value="custom">Custom (自訂前綴)</option>
+                                </select>
+                                <input type="text" id="filter-dst" class="form-control form-control-sm" placeholder="e.g. 10.0.0." style="margin-top: 6px; display: none;">
                             </div>
                             
                             <!-- Ports -->
@@ -476,13 +488,25 @@
                     
                     <!-- Inline Search Filters -->
                     <div style="padding: 16px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
-                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">來源 IP</label>
-                            <input type="text" id="filter-anomalies-src" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 192.168.1.1">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">來源 IP 類型</label>
+                            <select id="filter-anomalies-src-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                                <option value="">Any IP (任意)</option>
+                                <option value="internal">Private IP</option>
+                                <option value="external">Public IP</option>
+                                <option value="custom">Custom (自訂前綴)</option>
+                            </select>
+                            <input type="text" id="filter-anomalies-src" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 192.168.1.1">
                         </div>
-                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">目的 IP</label>
-                            <input type="text" id="filter-anomalies-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 8.8.8.8">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">目的 IP 類型</label>
+                            <select id="filter-anomalies-dst-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                                <option value="">Any IP (任意)</option>
+                                <option value="internal">Private IP</option>
+                                <option value="external">Public IP</option>
+                                <option value="custom">Custom (自訂前綴)</option>
+                            </select>
+                            <input type="text" id="filter-anomalies-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 8.8.8.8">
                         </div>
                         <div class="form-group" style="flex: 1; min-width: 100px; margin-bottom: 0;">
                             <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">連接埠 (Port)</label>
@@ -737,9 +761,15 @@
                             </h3>
                             <form id="audit-rule-form" style="display: flex; flex-direction: column; gap: 16px;">
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                                    <div class="form-group" style="margin: 0;">
-                                        <label for="audit-input-ip" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP 或 CIDR (選填)</label>
-                                        <input type="text" id="audit-input-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="例: 192.168.10.12 或 /24">
+                                    <div class="form-group" style="margin: 0; display: flex; flex-direction: column; gap: 8px;">
+                                        <label for="audit-select-ip-type" style="display: block; margin-bottom: 2px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP / CIDR 類型與範圍</label>
+                                        <select id="audit-select-ip-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);">
+                                            <option value="">任意 IP (Any)</option>
+                                            <option value="internal">Private IP (192.168.x / 172.16.x / 10.x)</option>
+                                            <option value="external">Public IP (Internet)</option>
+                                            <option value="custom">自訂 IP / CIDR</option>
+                                        </select>
+                                        <input type="text" id="audit-input-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); display: none;" placeholder="例: 192.168.10.12 或 /24">
                                     </div>
                                     <div class="form-group" style="margin: 0;">
                                         <label for="audit-input-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port 或 範圍 (選填)</label>

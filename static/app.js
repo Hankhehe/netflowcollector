@@ -192,6 +192,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Setup Event Listeners
 function setupEventListeners() {
+    // IP Type Select Show/Hide Inputs
+    const filterSrcType = document.getElementById('filter-src-type');
+    const filterSrcInput = document.getElementById('filter-src');
+    if (filterSrcType && filterSrcInput) {
+        filterSrcType.addEventListener('change', () => {
+            filterSrcInput.style.display = filterSrcType.value === 'custom' ? 'block' : 'none';
+            if (filterSrcType.value !== 'custom') {
+                filterSrcInput.value = '';
+            }
+        });
+    }
+
+    const filterDstType = document.getElementById('filter-dst-type');
+    const filterDstInput = document.getElementById('filter-dst');
+    if (filterDstType && filterDstInput) {
+        filterDstType.addEventListener('change', () => {
+            filterDstInput.style.display = filterDstType.value === 'custom' ? 'block' : 'none';
+            if (filterDstType.value !== 'custom') {
+                filterDstInput.value = '';
+            }
+        });
+    }
+
+    const auditSelectIpType = document.getElementById('audit-select-ip-type');
+    const auditInputIp = document.getElementById('audit-input-ip');
+    if (auditSelectIpType && auditInputIp) {
+        auditSelectIpType.addEventListener('change', () => {
+            auditInputIp.style.display = auditSelectIpType.value === 'custom' ? 'block' : 'none';
+            if (auditSelectIpType.value !== 'custom') {
+                auditInputIp.value = '';
+            }
+        });
+    }
+
+    const filterAnomaliesSrcType = document.getElementById('filter-anomalies-src-type');
+    const filterAnomaliesSrc = document.getElementById('filter-anomalies-src');
+    if (filterAnomaliesSrcType && filterAnomaliesSrc) {
+        filterAnomaliesSrcType.addEventListener('change', () => {
+            filterAnomaliesSrc.style.display = filterAnomaliesSrcType.value === 'custom' ? 'block' : 'none';
+            if (filterAnomaliesSrcType.value !== 'custom') {
+                filterAnomaliesSrc.value = '';
+            }
+        });
+    }
+
+    const filterAnomaliesDstType = document.getElementById('filter-anomalies-dst-type');
+    const filterAnomaliesDst = document.getElementById('filter-anomalies-dst');
+    if (filterAnomaliesDstType && filterAnomaliesDst) {
+        filterAnomaliesDstType.addEventListener('change', () => {
+            filterAnomaliesDst.style.display = filterAnomaliesDstType.value === 'custom' ? 'block' : 'none';
+            if (filterAnomaliesDstType.value !== 'custom') {
+                filterAnomaliesDst.value = '';
+            }
+        });
+    }
+
     // Tabs Navigation
     els.btnTabExplorer.addEventListener('click', (e) => {
         e.preventDefault();
@@ -385,8 +441,20 @@ function setupEventListeners() {
 
     if (els.btnApplyAnomaliesSearch) {
         els.btnApplyAnomaliesSearch.addEventListener('click', () => {
-            state.anomaliesFilters.src = els.filterAnomaliesSrc.value.trim();
-            state.anomaliesFilters.dst = els.filterAnomaliesDst.value.trim();
+            const srcTypeEl = document.getElementById('filter-anomalies-src-type');
+            if (srcTypeEl && srcTypeEl.value !== 'custom') {
+                state.anomaliesFilters.src = srcTypeEl.value;
+            } else {
+                state.anomaliesFilters.src = els.filterAnomaliesSrc.value.trim();
+            }
+
+            const dstTypeEl = document.getElementById('filter-anomalies-dst-type');
+            if (dstTypeEl && dstTypeEl.value !== 'custom') {
+                state.anomaliesFilters.dst = dstTypeEl.value;
+            } else {
+                state.anomaliesFilters.dst = els.filterAnomaliesDst.value.trim();
+            }
+
             state.anomaliesFilters.port = els.filterAnomaliesPort.value.trim();
             state.anomaliesFilters.flag = els.filterAnomaliesFlag.value;
             state.anomaliesPagination.offset = 0;
@@ -396,6 +464,16 @@ function setupEventListeners() {
 
     if (els.btnResetAnomaliesSearch) {
         els.btnResetAnomaliesSearch.addEventListener('click', () => {
+            const srcTypeEl = document.getElementById('filter-anomalies-src-type');
+            if (srcTypeEl) {
+                srcTypeEl.value = '';
+                els.filterAnomaliesSrc.style.display = 'none';
+            }
+            const dstTypeEl = document.getElementById('filter-anomalies-dst-type');
+            if (dstTypeEl) {
+                dstTypeEl.value = '';
+                els.filterAnomaliesDst.style.display = 'none';
+            }
             els.filterAnomaliesSrc.value = '';
             els.filterAnomaliesDst.value = '';
             els.filterAnomaliesPort.value = '';
@@ -568,6 +646,11 @@ function setupEventListeners() {
     
     els.btnResetFilters.addEventListener('click', () => {
         els.filterForm.reset();
+        // Hide custom IP inputs upon reset
+        const filterSrcInput = document.getElementById('filter-src');
+        const filterDstInput = document.getElementById('filter-dst');
+        if (filterSrcInput) filterSrcInput.style.display = 'none';
+        if (filterDstInput) filterDstInput.style.display = 'none';
         // Reset all custom checkboxes to checked by default
         const checkboxes = document.querySelectorAll('.custom-dropdown input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = true);
@@ -884,8 +967,21 @@ function updateTimeRangeSubtitle() {
 function applyFiltersFromForm() {
     state.filters.table = getSelectedTables();
     state.filters.exporter = getSelectedExporters();
-    state.filters.src = els.filterSrc.value.trim();
-    state.filters.dst = els.filterDst.value.trim();
+    
+    const srcTypeEl = document.getElementById('filter-src-type');
+    if (srcTypeEl && srcTypeEl.value !== 'custom') {
+        state.filters.src = srcTypeEl.value;
+    } else {
+        state.filters.src = els.filterSrc.value.trim();
+    }
+    
+    const dstTypeEl = document.getElementById('filter-dst-type');
+    if (dstTypeEl && dstTypeEl.value !== 'custom') {
+        state.filters.dst = dstTypeEl.value;
+    } else {
+        state.filters.dst = els.filterDst.value.trim();
+    }
+    
     state.filters.sport = els.filterSport.value.trim();
     state.filters.dport = els.filterDport.value.trim();
     state.filters.proto = getSelectedProtocols();
@@ -2289,8 +2385,17 @@ async function fetchAuditRules() {
         }
         
         tbody.innerHTML = rules.map(rule => {
-            const ipAliasSub = rule.ip_alias ? `<div class="domain-subtext" style="font-size: 0.75rem; color: var(--text-muted);">${rule.ip_alias}</div>` : '';
-            const ipDisplay = rule.ip ? `<div>${rule.ip}</div>${ipAliasSub}` : '<span class="text-muted">(任意)</span>';
+            let ipText = rule.ip || '';
+            let showAlias = rule.ip_alias;
+            if (ipText.toLowerCase() === 'internal') {
+                ipText = 'Private IP';
+                showAlias = '';
+            } else if (ipText.toLowerCase() === 'external') {
+                ipText = 'Public IP';
+                showAlias = '';
+            }
+            const ipAliasSub = showAlias ? `<div class="domain-subtext" style="font-size: 0.75rem; color: var(--text-muted);">${showAlias}</div>` : '';
+            const ipDisplay = rule.ip ? `<div>${ipText}</div>${ipAliasSub}` : '<span class="text-muted">(任意)</span>';
             const portDisplay = rule.port || '<span class="text-muted">(任意)</span>';
             const badgeClass = rule.flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
             const flagText = rule.flag === 'watch' ? '關注' : '異常';
@@ -2317,7 +2422,18 @@ async function fetchAuditRules() {
 
 // Submit new rule
 async function submitAuditRule() {
-    const ip = els.auditInputIp.value.trim();
+    const ipSelect = document.getElementById('audit-select-ip-type');
+    let ip = '';
+    if (ipSelect) {
+        const type = ipSelect.value;
+        if (type === 'custom') {
+            ip = els.auditInputIp.value.trim();
+        } else {
+            ip = type;
+        }
+    } else {
+        ip = els.auditInputIp.value.trim();
+    }
     const port = els.auditInputPort.value.trim();
     
     const flagEl = document.querySelector('input[name="audit-input-flag"]:checked');
@@ -2338,6 +2454,10 @@ async function submitAuditRule() {
         const data = await response.json();
         if (response.ok) {
             showAuditRuleStatus('規則儲存成功！', 'success');
+            if (ipSelect) {
+                ipSelect.value = '';
+                els.auditInputIp.style.display = 'none';
+            }
             els.auditInputIp.value = '';
             els.auditInputPort.value = '';
             fetchAuditRules();
@@ -2487,8 +2607,8 @@ function renderAuditMatches(records) {
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
-                    <div>${r.rule_ip || '(任意)'}</div>
-                    ${r.rule_ip_alias ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                    <div>${r.rule_ip ? (r.rule_ip.toLowerCase() === 'internal' ? 'Private IP' : (r.rule_ip.toLowerCase() === 'external' ? 'Public IP' : r.rule_ip)) : '(任意)'}</div>
+                    ${r.rule_ip_alias && r.rule_ip.toLowerCase() !== 'internal' && r.rule_ip.toLowerCase() !== 'external' ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
                 </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">
@@ -2698,8 +2818,8 @@ function renderAnomalousReportTable(records) {
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
-                    <div>${r.rule_ip || '(任意)'}</div>
-                    ${r.rule_ip_alias ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                    <div>${r.rule_ip ? (r.rule_ip.toLowerCase() === 'internal' ? 'Private IP' : (r.rule_ip.toLowerCase() === 'external' ? 'Public IP' : r.rule_ip)) : '(任意)'}</div>
+                    ${r.rule_ip_alias && r.rule_ip.toLowerCase() !== 'internal' && r.rule_ip.toLowerCase() !== 'external' ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
                 </td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">

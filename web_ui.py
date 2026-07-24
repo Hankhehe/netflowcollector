@@ -217,10 +217,25 @@ def resolve_ip_alias(ip_str: str) -> Optional[str]:
     if not ip_str:
         return None
     ip_str = ip_str.strip()
+    ip_lower = ip_str.lower()
+    if ip_lower == "internal":
+        return "Private IP"
+    elif ip_lower == "external":
+        return "Public IP"
     
     # 1. Exact match first
     if ip_str in ip_aliases_cache:
         return ip_aliases_cache[ip_str]
+
+def build_ip_where_clause(col: str, ip_query: str, params: dict, param_key: str) -> str:
+    val = ip_query.strip().lower()
+    if val == "internal":
+        return f"(isIPv4String({col}) OR isIPv6String({col})) AND (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+    elif val == "external":
+        return f"(isIPv4String({col}) OR isIPv6String({col})) AND NOT (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+    else:
+        params[param_key] = f"{ip_query}%"
+        return f"{col} LIKE %({param_key})s"
         
     # 2. CIDR range match from SQLite
     try:
@@ -508,11 +523,9 @@ def get_flows(
         params = {}
 
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -783,11 +796,9 @@ def export_flows(
         params = {}
 
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -1086,11 +1097,9 @@ def get_stats(
                 where_clauses.append("exporter IN %(exporter_list)s")
                 params["exporter_list"] = tuple(exp_parts)
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -1607,6 +1616,9 @@ def clear_all_aliases():
 def validate_ip_or_cidr(ip_str: str) -> bool:
     if not ip_str:
         return True
+    val = ip_str.strip().lower()
+    if val in ("internal", "external"):
+        return True
     try:
         ipaddress.ip_address(ip_str)
         return True
@@ -1639,6 +1651,18 @@ def validate_port_or_range(port_str: str) -> bool:
         except ValueError:
             return False
 
+INTRANET_NETWORKS = [
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("10.0.0.0/8")
+]
+
+def is_internal_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    for net in INTRANET_NETWORKS:
+        if ip_obj in net:
+            return True
+    return False
+
 def parse_rule_criteria(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     parsed = []
     for r in rules:
@@ -1651,13 +1675,17 @@ def parse_rule_criteria(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "port_obj": None
         }
         if r["ip"]:
-            try:
-                if '/' in r["ip"]:
-                    rule_obj["ip_obj"] = ipaddress.ip_network(r["ip"], strict=False)
-                else:
-                    rule_obj["ip_obj"] = ipaddress.ip_address(r["ip"])
-            except Exception:
-                pass
+            ip_val = r["ip"].strip().lower()
+            if ip_val in ("internal", "external"):
+                rule_obj["ip_obj"] = ip_val
+            else:
+                try:
+                    if '/' in r["ip"]:
+                        rule_obj["ip_obj"] = ipaddress.ip_network(r["ip"], strict=False)
+                    else:
+                        rule_obj["ip_obj"] = ipaddress.ip_address(r["ip"])
+                except Exception:
+                    pass
         if r["port"]:
             if '-' in r["port"]:
                 parts = r["port"].split('-')
@@ -1689,21 +1717,34 @@ def check_flow_match(flow: Dict[str, Any], parsed_rules: List[Dict[str, Any]]) -
         # IP match
         if rule["ip_obj"]:
             ip_matched = False
+            rule_ip = rule["ip_obj"]
             # Check src IP
             if flow_src_ip:
-                if isinstance(rule["ip_obj"], (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-                    if flow_src_ip == rule["ip_obj"]:
+                if rule_ip == "internal":
+                    if is_internal_ip(flow_src_ip):
+                        ip_matched = True
+                elif rule_ip == "external":
+                    if not is_internal_ip(flow_src_ip):
+                        ip_matched = True
+                elif isinstance(rule_ip, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+                    if flow_src_ip == rule_ip:
                         ip_matched = True
                 else: # Network
-                    if flow_src_ip in rule["ip_obj"]:
+                    if flow_src_ip in rule_ip:
                         ip_matched = True
             # Check dst IP
             if not ip_matched and flow_dst_ip:
-                if isinstance(rule["ip_obj"], (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-                    if flow_dst_ip == rule["ip_obj"]:
+                if rule_ip == "internal":
+                    if is_internal_ip(flow_dst_ip):
+                        ip_matched = True
+                elif rule_ip == "external":
+                    if not is_internal_ip(flow_dst_ip):
+                        ip_matched = True
+                elif isinstance(rule_ip, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+                    if flow_dst_ip == rule_ip:
                         ip_matched = True
                 else: # Network
-                    if flow_dst_ip in rule["ip_obj"]:
+                    if flow_dst_ip in rule_ip:
                         ip_matched = True
                         
         # Port match
@@ -2097,11 +2138,9 @@ def get_audit_matches_stats(
         params = {}
         
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -2319,11 +2358,9 @@ def get_audit_matches(
         params = {}
         
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -2448,11 +2485,9 @@ def export_audit_matches(
         params = {}
         
         if src:
-            where_clauses.append("src LIKE %(src)s")
-            params["src"] = f"{src}%"
+            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
-            where_clauses.append("dst LIKE %(dst)s")
-            params["dst"] = f"{dst}%"
+            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
