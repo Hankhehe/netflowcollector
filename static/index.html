@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Netflow Collector Dashboard</title>
+    <title>Netflow Collector 流量儀表板</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,57 +20,87 @@
         <!-- Sidebar / Navigation -->
         <aside class="sidebar">
             <div class="brand">
-                <i data-lucide="activity" class="brand-icon"></i>
-                <div class="brand-text">
-                    <h1>Netflow Collector</h1>
-                    <span>Management Web Console</span>
+                <div class="brand-left">
+                    <i data-lucide="activity" class="brand-icon"></i>
+                    <div class="brand-text">
+                        <h1>Netflow Collector</h1>
+                        <span>流量管理主控台</span>
+                    </div>
                 </div>
+                <button id="btn-toggle-sidebar" class="sidebar-toggle-btn" title="收合側邊欄">
+                    <i data-lucide="panel-left-close" class="toggle-icon-collapse"></i>
+                    <i data-lucide="panel-left-open" class="toggle-icon-expand" style="display: none;"></i>
+                </button>
             </div>
             <nav class="nav-menu">
-                <a href="#" class="nav-item active" id="btn-tab-anomalies">
+                <a href="#" class="nav-item active" id="btn-tab-anomalies" data-title="異常流量報告">
                     <i data-lucide="alert-triangle"></i>
-                    <span>Anomalous Traffic Report</span>
+                    <span>異常流量報告</span>
                 </a>
-                <a href="#" class="nav-item" id="btn-tab-analytics">
+                <a href="#" class="nav-item" id="btn-tab-analytics" data-title="流量統計分析">
                     <i data-lucide="bar-chart-2"></i>
-                    <span>Traffic Analytics</span>
+                    <span>流量統計分析</span>
                 </a>
-                <a href="#" class="nav-item" id="btn-tab-explorer">
+                <a href="#" class="nav-item" id="btn-tab-explorer" data-title="Flow 流量檢索">
                     <i data-lucide="search"></i>
-                    <span>Flow Explorer</span>
+                    <span>Flow 流量檢索</span>
                 </a>
                 
                 <!-- Collapsible Settings Menu -->
                 <div class="nav-item-collapsible" id="menu-settings" style="display: flex; flex-direction: column; width: 100%;">
-                    <a href="#" class="nav-item" id="btn-tab-settings-trigger" style="display: flex; align-items: center; width: 100%;">
+                    <a href="#" class="nav-item" id="btn-tab-settings-trigger" data-title="系統設定" style="display: flex; align-items: center; width: 100%;">
                         <i data-lucide="settings"></i>
-                        <span>Settings</span>
+                        <span>系統設定</span>
                         <i data-lucide="chevron-down" class="chevron-icon" style="margin-left: auto; width: 14px; height: 14px; transition: transform 0.2s;"></i>
                     </a>
                     <div class="submenu" style="display: none; padding-left: 20px; flex-direction: column; gap: 4px; margin-top: 4px;">
-                        <a href="#" class="nav-item" id="btn-tab-management" style="font-size: 0.88rem; padding: 8px 16px;">
+                        <a href="#" class="nav-item" id="btn-tab-management" data-title="資料庫與保留" style="font-size: 0.88rem; padding: 8px 16px;">
                             <i data-lucide="database" style="width: 16px; height: 16px;"></i>
-                            <span>Data Management</span>
+                            <span>資料庫與保留</span>
                         </a>
-                        <a href="#" class="nav-item" id="btn-tab-aliases" style="font-size: 0.88rem; padding: 8px 16px;">
-                            <i data-lucide="tag" style="width: 16px; height: 16px;"></i>
-                            <span>Alias Manager</span>
-                        </a>
-                        <a href="#" class="nav-item" id="btn-tab-audit" style="font-size: 0.88rem; padding: 8px 16px;">
-                            <i data-lucide="shield-alert" style="width: 16px; height: 16px;"></i>
-                            <span>Traffic Auditing</span>
-                        </a>
-                        <a href="#" class="nav-item" id="btn-tab-collector" style="font-size: 0.88rem; padding: 8px 16px;">
+                        <a href="#" class="nav-item" id="btn-tab-collector" data-title="收集器設定" style="font-size: 0.88rem; padding: 8px 16px;">
                             <i data-lucide="radio" style="width: 16px; height: 16px;"></i>
-                            <span>Collector Settings</span>
+                            <span>收集器設定</span>
+                        </a>
+                        <a href="#" class="nav-item" id="btn-tab-users" data-title="帳號管理" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="users" style="width: 16px; height: 16px;"></i>
+                            <span>帳號管理</span>
+                        </a>
+                        <a href="#" class="nav-item" id="btn-tab-aliases" data-title="別名管理" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="tag" style="width: 16px; height: 16px;"></i>
+                            <span>別名管理</span>
+                        </a>
+                        <a href="#" class="nav-item" id="btn-tab-audit" data-title="流量盤查" style="font-size: 0.88rem; padding: 8px 16px;">
+                            <i data-lucide="shield-alert" style="width: 16px; height: 16px;"></i>
+                            <span>流量盤查</span>
                         </a>
                     </div>
                 </div>
             </nav>
+
+            <!-- Sidebar User Profile & Actions -->
+            <div id="sidebar-user-section" style="padding: 12px 16px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; background: rgba(0, 0, 0, 0.15);">
+                <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+                    <div id="user-avatar-initial" style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem; color: #fff; flex-shrink: 0;">A</div>
+                    <div style="display: flex; flex-direction: column; overflow: hidden;">
+                        <span id="current-username" style="font-weight: 600; font-size: 0.88rem; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">admin</span>
+                        <span id="current-user-role" style="font-size: 0.72rem; color: var(--text-muted);">系統管理員</span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                    <button id="btn-open-change-pwd" class="btn btn-secondary" style="padding: 5px 8px; font-size: 0.75rem; border-radius: 6px;" title="修改我的密碼">
+                        <i data-lucide="key" style="width: 14px; height: 14px;"></i>
+                    </button>
+                    <button id="btn-logout" class="btn btn-secondary" style="padding: 5px 8px; font-size: 0.75rem; border-radius: 6px; color: var(--color-danger);" title="登出系統">
+                        <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+                    </button>
+                </div>
+            </div>
+
             <div class="sidebar-footer">
                 <div class="status-indicator online">
                     <span class="dot"></span>
-                    <span class="text">DB Connected</span>
+                    <span class="text">資料庫連線正常</span>
                 </div>
             </div>
         </aside>
@@ -80,31 +110,31 @@
             <!-- Header -->
             <header class="top-header">
                 <div class="header-title">
-                    <h2>Dashboard Overview</h2>
-                    <p class="subtitle" id="time-range-summary">Overview of the last 24 hours of traffic</p>
+                    <h2>儀表板總覽</h2>
+                    <p class="subtitle" id="time-range-summary">過去 24 小時流量總覽</p>
                 </div>
                 <div class="header-actions">
                     <!-- Global Custom Time Range (hidden by default) -->
                     <div id="global-custom-time-wrapper" style="display: none; align-items: center; gap: 8px;">
                         <div class="form-group-inline">
-                            <label for="global-start-time">From</label>
+                            <label for="global-start-time">起始時間</label>
                             <input type="datetime-local" id="global-start-time" class="form-control select-dark select-sm">
                         </div>
                         <div class="form-group-inline">
-                            <label for="global-end-time">To</label>
+                            <label for="global-end-time">結束時間</label>
                             <input type="datetime-local" id="global-end-time" class="form-control select-dark select-sm">
                         </div>
                     </div>
                     
                     <select id="global-time-range" class="form-control select-dark">
-                        <option value="1h">Last 1 Hour</option>
-                        <option value="24h" selected>Last 24 Hours</option>
-                        <option value="7d">Last 7 Days</option>
-                        <option value="custom">Specific Time</option>
+                        <option value="1h">過去 1 小時</option>
+                        <option value="24h" selected>過去 24 小時</option>
+                        <option value="7d">過去 7 天</option>
+                        <option value="custom">自訂時間範圍</option>
                     </select>
                     <button class="btn btn-primary" id="btn-refresh">
                         <i data-lucide="refresh-cw"></i>
-                        <span>Refresh</span>
+                        <span>重新整理</span>
                     </button>
                 </div>
             </header>
@@ -116,7 +146,7 @@
                         <i data-lucide="navigation"></i>
                     </div>
                     <div class="kpi-info">
-                        <span class="kpi-label">Total Flows</span>
+                        <span class="kpi-label">總 Flow 筆數</span>
                         <h3 class="kpi-value" id="kpi-total-flows">-</h3>
                     </div>
                 </div>
@@ -125,7 +155,7 @@
                         <i data-lucide="hard-drive"></i>
                     </div>
                     <div class="kpi-info">
-                        <span class="kpi-label">Total Volume</span>
+                        <span class="kpi-label">總傳輸量</span>
                         <h3 class="kpi-value" id="kpi-total-bytes">-</h3>
                     </div>
                 </div>
@@ -134,7 +164,7 @@
                         <i data-lucide="layers"></i>
                     </div>
                     <div class="kpi-info">
-                        <span class="kpi-label">Total Packets</span>
+                        <span class="kpi-label">總封包數</span>
                         <h3 class="kpi-value" id="kpi-total-packets">-</h3>
                     </div>
                 </div>
@@ -143,7 +173,7 @@
                         <i data-lucide="server"></i>
                     </div>
                     <div class="kpi-info">
-                        <span class="kpi-label">Active Exporters</span>
+                        <span class="kpi-label">活躍 Exporter 數</span>
                         <h3 class="kpi-value" id="kpi-total-exporters">-</h3>
                     </div>
                 </div>
@@ -156,10 +186,10 @@
                         <div class="filter-flex-row">
                             <!-- Data Source Custom Dropdown -->
                             <div class="form-group">
-                                <label>Data Source</label>
+                                <label>資料來源</label>
                                 <div class="custom-dropdown" id="dropdown-table">
                                     <div class="dropdown-trigger">
-                                        <span class="trigger-label" id="label-table">All Data Sources</span>
+                                        <span class="trigger-label" id="label-table">所有資料來源</span>
                                         <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
                                     </div>
                                     <div class="dropdown-menu-panel" id="filter-table-group">
@@ -174,7 +204,7 @@
                                 <label>Exporter IP</label>
                                 <div class="custom-dropdown" id="dropdown-exporter">
                                     <div class="dropdown-trigger">
-                                        <span class="trigger-label" id="label-exporter">All Exporters</span>
+                                        <span class="trigger-label" id="label-exporter">所有 Exporter</span>
                                         <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
                                     </div>
                                     <div class="dropdown-menu-panel" id="filter-exporter-group">
@@ -183,45 +213,51 @@
                                 </div>
                             </div>
                             
-                            <!-- Source IP -->
-                            <div class="form-group">
-                                <label for="filter-src-type">Source IP Type</label>
-                                <select id="filter-src-type" class="form-control form-control-sm select-dark">
-                                    <option value="">Any IP (任意)</option>
-                                    <option value="internal">Private IP</option>
-                                    <option value="external">Public IP</option>
-                                    <option value="custom">Custom (自訂前綴)</option>
-                                </select>
-                                <input type="text" id="filter-src" class="form-control form-control-sm" placeholder="e.g. 192.168." style="margin-top: 6px; display: none;">
-                            </div>
-                            
-                            <!-- Destination IP -->
-                            <div class="form-group">
-                                <label for="filter-dst-type">Destination IP Type</label>
-                                <select id="filter-dst-type" class="form-control form-control-sm select-dark">
-                                    <option value="">Any IP (任意)</option>
-                                    <option value="internal">Private IP</option>
-                                    <option value="external">Public IP</option>
-                                    <option value="custom">Custom (自訂前綴)</option>
-                                </select>
-                                <input type="text" id="filter-dst" class="form-control form-control-sm" placeholder="e.g. 10.0.0." style="margin-top: 6px; display: none;">
-                            </div>
-                            
-                            <!-- Ports -->
-                            <div class="form-group">
-                                <label>Ports (Src / Dst)</label>
-                                <div class="ports-flex-row">
-                                    <input type="number" id="filter-sport" class="form-control form-control-sm" placeholder="Src">
-                                    <input type="number" id="filter-dport" class="form-control form-control-sm" placeholder="Dst">
+                            <!-- IP Filter with Direction -->
+                            <div class="form-group" style="min-width: 220px;">
+                                <label for="filter-ip-val">IP 位址 (方向 / 類型)</label>
+                                <div style="display: flex; gap: 4px;">
+                                    <select id="filter-ip-dir" class="form-control form-control-sm select-dark" style="flex: 1.1;">
+                                        <option value="any">任一端 (來源/目的)</option>
+                                        <option value="src">僅來源 IP</option>
+                                        <option value="dst">僅目的 IP</option>
+                                    </select>
+                                    <select id="filter-ip-type" class="form-control form-control-sm select-dark" style="flex: 1.1;">
+                                        <option value="">任意 IP</option>
+                                        <option value="internal">私有 IP (Private)</option>
+                                        <option value="external">公網 IP (Public)</option>
+                                        <option value="custom">自訂 IP/前綴</option>
+                                    </select>
                                 </div>
+                                <input type="text" id="filter-ip-val" class="form-control form-control-sm" placeholder="例如: 192.168.1.1 或 10.0.0.0/8" style="margin-top: 6px; display: none;">
+                                <!-- Hidden legacy inputs to maintain backward compatibility if accessed -->
+                                <input type="hidden" id="filter-src-type" value="">
+                                <input type="hidden" id="filter-src" value="">
+                                <input type="hidden" id="filter-dst-type" value="">
+                                <input type="hidden" id="filter-dst" value="">
+                            </div>
+                            
+                            <!-- Port Filter with Direction -->
+                            <div class="form-group" style="min-width: 170px;">
+                                <label for="filter-port-val">Port 埠號 (方向)</label>
+                                <div style="display: flex; gap: 4px;">
+                                    <select id="filter-port-dir" class="form-control form-control-sm select-dark" style="flex: 1;">
+                                        <option value="any">任一端</option>
+                                        <option value="src">僅來源</option>
+                                        <option value="dst">僅目的</option>
+                                    </select>
+                                    <input type="number" id="filter-port-val" class="form-control form-control-sm" placeholder="例如: 80, 443" style="flex: 1.2;">
+                                </div>
+                                <input type="hidden" id="filter-sport" value="">
+                                <input type="hidden" id="filter-dport" value="">
                             </div>
                             
                             <!-- Protocols Custom Dropdown -->
                             <div class="form-group">
-                                <label>Protocols</label>
+                                <label>通訊協定</label>
                                 <div class="custom-dropdown" id="dropdown-proto">
                                     <div class="dropdown-trigger">
-                                        <span class="trigger-label" id="label-proto">All Protocols</span>
+                                        <span class="trigger-label" id="label-proto">所有協定</span>
                                         <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
                                     </div>
                                     <div class="dropdown-menu-panel" id="filter-proto-group">
@@ -238,21 +274,21 @@
                             
                             <!-- Columns & Grouping Custom Dropdown -->
                             <div class="form-group">
-                                <label>Columns & Grouping</label>
+                                <label>顯示欄位與群組</label>
                                 <div class="custom-dropdown" id="dropdown-columns">
                                     <div class="dropdown-trigger">
-                                        <span class="trigger-label" id="label-columns">All Columns</span>
+                                        <span class="trigger-label" id="label-columns">所有欄位</span>
                                         <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
                                     </div>
                                     <div class="dropdown-menu-panel" id="column-toggles">
-                                        <label class="checkbox-label"><input type="checkbox" value="type" checked> Type</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="ts" checked> Timestamp</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="type" checked> 類型</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="ts" checked> 時間戳記</label>
                                         <label class="checkbox-label"><input type="checkbox" value="exporter" checked> Exporter</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="src" checked> Src IP</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="sport" checked> Src Port</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="dst" checked> Dst IP</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="dport" checked> Dst Port</label>
-                                        <label class="checkbox-label"><input type="checkbox" value="proto" checked> Protocol</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="src" checked> 來源 IP</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="sport" checked> 來源 Port</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="dst" checked> 目的 IP</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="dport" checked> 目的 Port</label>
+                                        <label class="checkbox-label"><input type="checkbox" value="proto" checked> 協定</label>
                                     </div>
                                 </div>
                             </div>
@@ -260,8 +296,8 @@
                             <!-- Actions Buttons -->
                             <div class="form-group form-actions-group">
                                 <div class="action-buttons-flex">
-                                    <button type="button" id="btn-reset-filters" class="btn btn-secondary btn-sm-action">Reset</button>
-                                    <button type="submit" class="btn btn-primary btn-sm-action">Apply</button>
+                                    <button type="button" id="btn-reset-filters" class="btn btn-secondary btn-sm-action">重設</button>
+                                    <button type="submit" class="btn btn-primary btn-sm-action">套用篩選</button>
                                 </div>
                             </div>
                         </div>
@@ -276,10 +312,10 @@
                     <!-- Flow Data Table -->
                     <div class="card table-card flex-grow">
                         <div class="card-header table-header">
-                            <h3><i data-lucide="list" class="icon-sm"></i> Flow Records</h3>
+                            <h3><i data-lucide="list" class="icon-sm"></i> Flow 流量記錄</h3>
                             <div class="header-pagination-wrapper">
                                 <div class="page-size-selector">
-                                    <label for="page-size">Limit</label>
+                                    <label for="page-size">每頁筆數</label>
                                     <select id="page-size" class="form-control select-sm">
                                         <option value="25">25</option>
                                         <option value="50" selected>50</option>
@@ -289,35 +325,35 @@
                                 </div>
                                 <button type="button" class="btn btn-secondary" id="btn-export-csv" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
                                     <i data-lucide="download" style="width: 14px; height: 14px;"></i>
-                                    <span>Export CSV</span>
+                                    <span>匯出 CSV</span>
                                 </button>
                                 <div class="pagination-summary">
-                                    Showing <span id="flow-range-start">0</span> to <span id="flow-range-end">0</span> of <span id="flow-total-filtered">0</span>
+                                    顯示第 <span id="flow-range-start">0</span> 至 <span id="flow-range-end">0</span> 筆，共 <span id="flow-total-filtered">0</span> 筆
                                 </div>
                                 <div class="pagination" id="flows-pagination"></div>
                             </div>
                         </div>
                         <div class="card-body no-padding table-responsive">
-                            <table class="data-table" id="flows-table">
+                            <table class="data-table" id="flows-table" style="min-width: 1280px;">
                                 <thead>
                                     <tr>
-                                        <th class="sortable col-type" data-sort="type">Type <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-ts" data-sort="ts">Timestamp (UTC) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-exporter" data-sort="exporter">Exporter <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-src" data-sort="src">Source IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-sport" data-sort="sport">Src Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-dst" data-sort="dst">Destination IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-dport" data-sort="dport">Dst Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-proto" data-sort="proto">Proto <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-packets" data-sort="packets">Packets <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                        <th class="sortable col-octets" data-sort="octets">Bytes <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-type" data-sort="type" style="min-width: 85px;">類型 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-ts" data-sort="ts" style="min-width: 160px;">時間戳記 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-exporter" data-sort="exporter" style="min-width: 130px;">Exporter <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-src" data-sort="src" style="min-width: 170px;">來源 IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-sport" data-sort="sport" style="min-width: 95px;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-dst" data-sort="dst" style="min-width: 170px;">目的 IP <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-dport" data-sort="dport" style="min-width: 95px;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-proto" data-sort="proto" style="min-width: 75px;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-packets" data-sort="packets" style="min-width: 90px; text-align: right;">封包數 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                        <th class="sortable col-octets" data-sort="octets" style="min-width: 110px; text-align: right;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
                                     </tr>
                                 </thead>
                                 <tbody id="flows-tbody">
                                     <tr>
                                         <td colspan="10" class="text-center text-muted py-5">
                                             <div class="spinner"></div>
-                                            Loading flow records...
+                                            正在載入流量記錄...
                                         </td>
                                     </tr>
                                 </tbody>
@@ -333,7 +369,7 @@
                     <!-- Traffic Over Time Card -->
                     <div class="card span-full">
                         <div class="card-header">
-                            <h3><i data-lucide="trending-up" class="icon-sm"></i> Traffic Volume Over Time</h3>
+                            <h3><i data-lucide="trending-up" class="icon-sm"></i> 流量傳輸趨勢</h3>
                         </div>
                         <div class="card-body chart-container">
                             <canvas id="chart-traffic-time"></canvas>
@@ -343,7 +379,7 @@
                     <!-- Top Sources Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="arrow-up-right" class="icon-sm"></i> Top Sources (Talkers)</h3>
+                            <h3><i data-lucide="arrow-up-right" class="icon-sm"></i> 前十大來源 IP (Top Sources)</h3>
                         </div>
                         <div class="card-body chart-container">
                             <canvas id="chart-top-sources"></canvas>
@@ -353,7 +389,7 @@
                     <!-- Top Destinations Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="arrow-down-left" class="icon-sm"></i> Top Destinations</h3>
+                            <h3><i data-lucide="arrow-down-left" class="icon-sm"></i> 前十大目的 IP (Top Destinations)</h3>
                         </div>
                         <div class="card-body chart-container">
                             <canvas id="chart-top-destinations"></canvas>
@@ -363,7 +399,7 @@
                     <!-- Top Source Ports Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="hash" class="icon-sm"></i> Top 10 Source Ports</h3>
+                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大來源 Port</h3>
                         </div>
                         <div class="card-body chart-container">
                             <canvas id="chart-top-src-ports"></canvas>
@@ -373,7 +409,7 @@
                     <!-- Top Destination Ports Card -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="hash" class="icon-sm"></i> Top 10 Destination Ports</h3>
+                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大目的 Port</h3>
                         </div>
                         <div class="card-body chart-container">
                             <canvas id="chart-top-dst-ports"></canvas>
@@ -383,7 +419,7 @@
                     <!-- Protocols distribution -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="pie-chart" class="icon-sm"></i> Protocols Distribution</h3>
+                            <h3><i data-lucide="pie-chart" class="icon-sm"></i> 通訊協定分佈</h3>
                         </div>
                         <div class="card-body chart-container flex-center">
                             <div class="doughnut-wrapper">
@@ -395,7 +431,7 @@
                     <!-- Top Exporters -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="activity" class="icon-sm"></i> Top Active Exporters</h3>
+                            <h3><i data-lucide="activity" class="icon-sm"></i> 活躍 Exporter 分佈</h3>
                         </div>
                         <div class="card-body chart-container flex-center">
                             <div class="doughnut-wrapper">
@@ -415,7 +451,7 @@
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                                 <i data-lucide="arrow-up-right" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
-                                <span>Top Anomalous Sources</span>
+                                <span>前十大異常來源 IP</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
@@ -428,7 +464,7 @@
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                                 <i data-lucide="arrow-down-left" style="color: var(--color-success); width: 20px; height: 20px;"></i>
-                                <span>Top Anomalous Destinations</span>
+                                <span>前十大異常目的 IP</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
@@ -441,7 +477,7 @@
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                                 <i data-lucide="hash" style="color: var(--color-info); width: 20px; height: 20px;"></i>
-                                <span>Top Anomalous Ports</span>
+                                <span>前十大異常 Port</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
@@ -454,7 +490,7 @@
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                                 <i data-lucide="activity" style="color: var(--color-success); width: 20px; height: 20px;"></i>
-                                <span>Top Anomalous Protocols</span>
+                                <span>前十大異常協定</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
@@ -467,7 +503,7 @@
                     <div class="card-header table-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                             <i data-lucide="alert-triangle" style="color: var(--color-danger); width: 20px; height: 20px;"></i>
-                            <span>Anomalous Traffic Report</span>
+                            <span>異常流量報告</span>
                         </h3>
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                             <div class="page-size-selector" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem;">
@@ -492,34 +528,47 @@
                     
                     <!-- Inline Search Filters -->
                     <div style="padding: 16px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
-                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">來源 IP 類型</label>
-                            <select id="filter-anomalies-src-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">Any IP (任意)</option>
-                                <option value="internal">Private IP</option>
-                                <option value="external">Public IP</option>
-                                <option value="custom">Custom (自訂前綴)</option>
+                        <div class="form-group" style="flex: 1.4; min-width: 220px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">IP 位址 (方向 / 類型)</label>
+                            <div style="display: flex; gap: 4px;">
+                                <select id="filter-anomalies-ip-dir" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
+                                    <option value="any">任一端 (來源/目的)</option>
+                                    <option value="src">僅來源 IP</option>
+                                    <option value="dst">僅目的 IP</option>
+                                </select>
+                                <select id="filter-anomalies-ip-type" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
+                                    <option value="">任意 IP</option>
+                                    <option value="internal">私有 IP</option>
+                                    <option value="external">公網 IP</option>
+                                    <option value="custom">自訂 IP/前綴</option>
+                                </select>
+                            </div>
+                            <input type="text" id="filter-anomalies-ip-val" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 192.168.1.1 或 10.0.0.0/8">
+                        </div>
+                        <div class="form-group" style="flex: 1.2; min-width: 170px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">Port 埠號 (方向)</label>
+                            <div style="display: flex; gap: 4px;">
+                                <select id="filter-anomalies-port-dir" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
+                                    <option value="any">任一端</option>
+                                    <option value="src">僅來源</option>
+                                    <option value="dst">僅目的</option>
+                                </select>
+                                <input type="number" id="filter-anomalies-port-val" class="form-control select-dark" style="flex: 1.2; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
+                            </div>
+                        </div>
+                        <div class="form-group" style="flex: 0.8; min-width: 110px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">傳輸協定</label>
+                            <select id="filter-anomalies-proto" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                                <option value="">全部協定</option>
+                                <option value="TCP">TCP (6)</option>
+                                <option value="UDP">UDP (17)</option>
+                                <option value="ICMP">ICMP (1)</option>
                             </select>
-                            <input type="text" id="filter-anomalies-src" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 192.168.1.1">
                         </div>
-                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">目的 IP 類型</label>
-                            <select id="filter-anomalies-dst-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">Any IP (任意)</option>
-                                <option value="internal">Private IP</option>
-                                <option value="external">Public IP</option>
-                                <option value="custom">Custom (自訂前綴)</option>
-                            </select>
-                            <input type="text" id="filter-anomalies-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 8.8.8.8">
-                        </div>
-                        <div class="form-group" style="flex: 1; min-width: 100px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">連接埠 (Port)</label>
-                            <input type="number" id="filter-anomalies-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
-                        </div>
-                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">旗標 (Flag)</label>
+                        <div class="form-group" style="flex: 0.8; min-width: 110px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">標記旗標</label>
                             <select id="filter-anomalies-flag" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">所有旗標</option>
+                                <option value="">所有標記</option>
                                 <option value="watch">關注 (Watch)</option>
                                 <option value="anomaly">異常 (Anomaly)</option>
                             </select>
@@ -530,27 +579,25 @@
                         </div>
                     </div>
 
-                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow-y: auto;">
-                        <table class="data-table" id="anomalies-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow: auto;">
+                        <table class="data-table" id="anomalies-table" style="min-width: 1350px; border-collapse: collapse; font-size: 0.85rem;">
                             <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                 <tr>
-                                    <th class="sortable sort-active" data-sort="match_ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
-                                    <th class="sortable" data-sort="ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="match_flag" style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="rule_ip" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="rule_port" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="src" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="sport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="dst" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="dport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="proto" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="packets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="octets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable sort-active" data-sort="ts" style="min-width: 155px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
+                                    <th class="sortable" data-sort="match_flag" style="min-width: 75px; padding: 10px 14px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="exporter" style="min-width: 160px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">收集器 IP (Collector IP) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="src" style="min-width: 170px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="sport" style="min-width: 95px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dst" style="min-width: 170px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dport" style="min-width: 95px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="proto" style="min-width: 75px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="packets" style="min-width: 85px; padding: 10px 14px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="octets" style="min-width: 100px; padding: 10px 14px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
                                 </tr>
                             </thead>
                             <tbody id="anomalies-tbody">
                                 <tr>
-                                    <td colspan="12" class="text-center text-muted py-5" style="padding: 40px 0;">無任何報告資料。</td>
+                                    <td colspan="10" class="text-center text-muted py-5" style="padding: 40px 0;">無任何報告資料。</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -560,31 +607,118 @@
 
             <!-- Settings - Data Management View -->
             <section id="view-data-management" class="dashboard-view" style="padding: 20px;">
-                <div style="max-width: 100%; margin: 20px auto 0 auto;">
+                <div style="max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+                    
+                    <!-- Card 1: Retention Policy & Auto Scheduler -->
                     <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
-                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; gap: 8px;">
-                            <i data-lucide="database" class="icon-sm" style="color: var(--color-danger);"></i>
-                            <h3 style="font-size: 1.1rem; font-weight: 600;">Manual Data Cleanup</h3>
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <i data-lucide="clock" class="icon-sm" style="color: var(--color-primary); width: 22px; height: 22px;"></i>
+                                <h3 style="font-size: 1.15rem; font-weight: 600; margin: 0;">Flow 資料保留政策與定時排程</h3>
+                            </div>
+                            <span id="retention-status-badge" class="badge badge-success" style="padding: 5px 12px; font-size: 0.82rem;">排程執行中</span>
                         </div>
                         <div class="card-body" style="padding: 24px;">
                             <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
-                                Here you can manually delete flow logs that are older than a specific date. 
-                                This operation will run asynchronously in the background on the database level.
+                                設定系統中 NetFlow v9 與 IPFIX 流量資料的自動保留天數。排程背景服務將依設定之時間每日自動定時檢查，當系統時間大於下次預計執行時間時，自動清理超過保留期限的歷史流量記錄。
+                            </p>
+
+                            <!-- Retention Status Indicators -->
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                                <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px;">
+                                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                        <i data-lucide="history" style="width: 14px; height: 14px;"></i>
+                                        <span>上次執行刪除時間 (TW)</span>
+                                    </div>
+                                    <div id="retention-last-run-time" style="font-family: var(--font-mono); font-size: 1rem; font-weight: 600; color: var(--text-primary);">-</div>
+                                </div>
+                                <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px;">
+                                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                        <i data-lucide="calendar-clock" style="width: 14px; height: 14px; color: #818cf8;"></i>
+                                        <span>下次預計刪除時間 (TW)</span>
+                                    </div>
+                                    <div id="retention-next-run-time" style="font-family: var(--font-mono); font-size: 1rem; font-weight: 600; color: #818cf8;">-</div>
+                                </div>
+                                <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px;">
+                                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                        <i data-lucide="check-circle" style="width: 14px; height: 14px; color: #34d399;"></i>
+                                        <span>最近執行結果</span>
+                                    </div>
+                                    <div id="retention-last-message" style="font-size: 0.85rem; color: var(--text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">載入中...</div>
+                                </div>
+                            </div>
+
+                            <!-- Form Controls -->
+                            <form id="form-retention-settings" style="display: flex; flex-direction: column; gap: 18px;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
+                                    <div class="form-group">
+                                        <label for="input-retention-days" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            流量資料保留天數：
+                                        </label>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <input type="number" id="input-retention-days" class="form-control select-dark" min="1" max="3650" value="7" required style="width: 140px; font-family: var(--font-mono);">
+                                            <span style="font-size: 0.9rem; color: var(--text-secondary);">天 (保留最近 N 天資料)</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="input-retention-time" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            每日定時刪除時間 (台灣時間)：
+                                        </label>
+                                        <input type="time" id="input-retention-time" class="form-control select-dark" value="03:00" required style="width: 160px; font-family: var(--font-mono);">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="select-retention-enabled" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            排程啟用狀態：
+                                        </label>
+                                        <select id="select-retention-enabled" class="form-control select-dark" style="width: 180px;">
+                                            <option value="1">啟用定時排程</option>
+                                            <option value="0">停用定時排程</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 18px;">
+                                    <button type="submit" class="btn btn-primary" id="btn-save-retention" style="height: 40px; padding: 0 20px; display: flex; align-items: center; gap: 8px;">
+                                        <i data-lucide="save"></i>
+                                        <span>儲存保留政策</span>
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" id="btn-run-retention-now" style="height: 40px; padding: 0 18px; display: flex; align-items: center; gap: 8px;">
+                                        <i data-lucide="play"></i>
+                                        <span>立即執行排程清理</span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <div id="retention-status-alert" style="margin-top: 16px; padding: 12px 16px; border-radius: 8px; display: none; font-size: 0.88rem;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Manual Data Cleanup -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="trash-2" class="icon-sm" style="color: var(--color-danger); width: 22px; height: 22px;"></i>
+                            <h3 style="font-size: 1.15rem; font-weight: 600; margin: 0;">指定時間手動資料清理</h3>
+                        </div>
+                        <div class="card-body" style="padding: 24px;">
+                            <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
+                                您可以在此選擇特定時間點，手動清理該時間點之前的所有 Flow 流量記錄（台灣時間 Asia/Taipei）。
                             </p>
                             
-                            <div class="form-group" style="margin-bottom: 24px;">
+                            <div class="form-group" style="margin-bottom: 24px; max-width: 480px;">
                                 <label for="cleanup-before-date" style="display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; color: var(--text-primary);">
-                                    Delete all data before:
+                                    清除此時間點以前的所有資料 (台灣時間)：
                                 </label>
                                 <input type="datetime-local" id="cleanup-before-date" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-sans);">
                                 <span class="text-muted" style="display: block; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);">
-                                    Select a date and time. All IPFIX and NetFlow v9 records before this timestamp will be deleted.
+                                    請選擇日期與時間。所有在此時間戳記之前的 IPFIX 與 NetFlow v9 記錄皆將被清除。
                                 </span>
                             </div>
                             
-                            <button class="btn btn-danger" id="btn-execute-cleanup">
+                            <button class="btn btn-danger" id="btn-execute-cleanup" style="height: 40px; padding: 0 20px; display: flex; align-items: center; gap: 8px;">
                                 <i data-lucide="trash-2"></i>
-                                <span>Execute Cleanup</span>
+                                <span>執行資料清理</span>
                             </button>
                             
                             <div id="cleanup-status-message" style="margin-top: 20px; padding: 14px 18px; border-radius: 8px; display: none; font-size: 0.88rem; line-height: 1.4;">
@@ -601,20 +735,20 @@
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;">
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <i data-lucide="tag" class="icon-sm" style="color: var(--color-primary);"></i>
-                                <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0;">Alias Manager</h3>
+                                <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0;">別名管理</h3>
                             </div>
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <button type="button" id="btn-export-aliases" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
                                     <i data-lucide="download" style="width: 14px; height: 14px;"></i>
-                                    <span>Export Backup</span>
+                                    <span>匯出備份</span>
                                 </button>
                                 <button type="button" id="btn-import-aliases" class="btn btn-primary" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
                                     <i data-lucide="upload" style="width: 14px; height: 14px;"></i>
-                                    <span>Import Backup</span>
+                                    <span>匯入備份</span>
                                 </button>
                                 <button type="button" id="btn-clear-aliases" class="btn btn-danger" style="height: 32px; padding: 0 12px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px;">
                                     <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
-                                    <span>Clear All</span>
+                                    <span>全部清空</span>
                                 </button>
                                 <input type="file" id="input-import-aliases" accept=".json" style="display: none;">
                             </div>
@@ -622,39 +756,39 @@
                         <div class="card-body" style="padding: 24px;">
                             <!-- Segmented Control Button Group -->
                             <div class="segmented-control" style="display: flex; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 3px; margin-bottom: 24px;">
-                                <button type="button" id="btn-toggle-ip" class="segmented-btn active" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">IP Aliases</button>
-                                <button type="button" id="btn-toggle-port" class="segmented-btn" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">Port Aliases</button>
+                                <button type="button" id="btn-toggle-ip" class="segmented-btn active" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">IP 別名</button>
+                                <button type="button" id="btn-toggle-port" class="segmented-btn" style="flex: 1; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; transition: all 0.2s;">Port 別名</button>
                             </div>
 
                             <!-- IP Alias Mode Container -->
                             <div id="container-ip-alias">
                                 <p class="text-muted" style="margin-bottom: 20px; font-size: 0.88rem; line-height: 1.5; color: var(--text-secondary);">
-                                    Map IP addresses to friendly labels (e.g. `192.168.10.12` -> `ClickHouse DB`). Mapped IPs display their aliases as subtexts in Flow Records. Unmapped IPs fall back to DNS lookup results.
+                                    將 IP 位址對應至易讀別名標籤（例如 `192.168.10.12` -> `ClickHouse DB`）。設定別名後將於流量記錄中作為副標題顯示。未設定別名之 IP 則退回顯示反向 DNS 查詢結果。
                                 </p>
                                 
                                 <form id="form-ip-alias" style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px;">
                                     <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                                        <label for="input-alias-ip" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP Address / CIDR</label>
-                                        <input type="text" id="input-alias-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. 192.168.1.0/24" required pattern="^(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\/([0-9]|[1-2][0-9]|3[0-2]))?)$|^(([0-9a-fA-F:]+)(\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8]))?)$" title="Enter a valid IPv4/IPv6 address or CIDR block (e.g. 192.168.1.0/24)">
+                                        <label for="input-alias-ip" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP 位址 / CIDR</label>
+                                        <input type="text" id="input-alias-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. 192.168.1.0/24" required pattern="^(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\/([0-9]|[1-2][0-9]|3[0-2]))?)$|^(([0-9a-fA-F:]+)(\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8]))?)$" title="請輸入有效的 IPv4/IPv6 位址或 CIDR 網段 (例如 192.168.1.0/24)">
                                     </div>
                                     <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                                        <label for="input-alias-ip-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Alias Label</label>
+                                        <label for="input-alias-ip-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">別名名稱</label>
                                         <input type="text" id="input-alias-ip-name" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. Gateway" required>
                                     </div>
-                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">Save</button>
+                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">儲存</button>
                                 </form>
 
                                 <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
                                     <input type="text" id="input-search-ip-aliases" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.85rem;" placeholder="搜尋 IP 網段或別名名稱...">
                                 </div>
 
-                                <div style="max-height: 230px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
-                                    <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                <div style="max-height: 230px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                                    <table class="data-table" style="min-width: 480px; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                         <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                             <tr>
-                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP Address</th>
-                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Alias Name</th>
-                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">Action</th>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP 位址</th>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">別名名稱</th>
+                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">操作</th>
                                             </tr>
                                         </thead>
                                         <tbody id="ip-aliases-tbody">
@@ -676,28 +810,28 @@
                             <!-- Port Alias Mode Container -->
                             <div id="container-port-alias" style="display: none;">
                                 <p class="text-muted" style="margin-bottom: 20px; font-size: 0.88rem; line-height: 1.5; color: var(--text-secondary);">
-                                    Map port numbers to friendly names. Named ports display aliases below port numbers in Flow Records.
+                                    將通訊埠號（Port）對應至易讀服務名稱。設定別名後將於流量記錄之埠號下方顯示。
                                 </p>
 
                                 <form id="form-port-alias" style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 20px;">
                                     <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                                        <label for="input-alias-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port</label>
+                                        <label for="input-alias-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port 埠號</label>
                                         <input type="number" id="input-alias-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. 80" required min="1" max="65535">
                                     </div>
                                     <div class="form-group" style="flex: 2; margin-bottom: 0;">
-                                        <label for="input-alias-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Alias Name</label>
+                                        <label for="input-alias-name" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">別名名稱</label>
                                         <input type="text" id="input-alias-name" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="e.g. HTTP" required>
                                     </div>
-                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">Save</button>
+                                    <button type="submit" class="btn btn-primary" style="height: 38px; padding: 0 16px; border-radius: 6px; font-weight: 500;">儲存</button>
                                 </form>
 
-                                <div style="max-height: 230px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
-                                    <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                <div style="max-height: 230px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                                    <table class="data-table" style="min-width: 480px; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                         <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                             <tr>
                                                 <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Port</th>
-                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Name</th>
-                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">Action</th>
+                                                <th style="padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">別名名稱</th>
+                                                <th style="padding: 8px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">操作</th>
                                             </tr>
                                         </thead>
                                         <tbody id="port-aliases-tbody">
@@ -823,14 +957,14 @@
                                 <input type="file" id="input-import-rules" accept="application/json" style="display: none;">
                             </div>
                         </div>
-                        <div style="flex-grow: 1; min-height: 300px; max-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
-                            <table class="data-table" style="min-width: 100%; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                        <div style="flex-grow: 1; min-height: 300px; max-height: 480px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0, 0, 0, 0.25);">
+                            <table class="data-table" style="min-width: 580px; width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                 <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                     <tr>
-                                        <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP / CIDR</th>
-                                        <th style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Port / 範圍</th>
-                                        <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">標記</th>
-                                        <th style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">操作</th>
+                                        <th style="min-width: 180px; padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">IP / CIDR</th>
+                                        <th style="min-width: 120px; padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">Port / 範圍</th>
+                                        <th style="min-width: 80px; padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937;">標記</th>
+                                        <th style="min-width: 120px; padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="audit-rules-tbody">
@@ -849,7 +983,7 @@
                     <div class="card-header table-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                         <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
                             <i data-lucide="alert-triangle" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
-                            <span>Anomalous Traffic Report</span>
+                            <span>異常流量報告</span>
                         </h3>
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                             <div class="page-size-selector" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem;">
@@ -867,7 +1001,7 @@
                             </button>
                             <button type="button" class="btn btn-danger" id="btn-clear-audit-matches" style="height: 34px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px; display: flex; align-items: center; gap: 6px;">
                                 <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
-                                <span>清除所有報告</span>
+                                <span>清除所有記錄</span>
                             </button>
                             <div style="font-size: 0.82rem; color: var(--text-muted);">
                                 共符合 <span id="audit-total-filtered" style="font-weight: 600; color: var(--text-primary);">0</span> 筆
@@ -887,13 +1021,13 @@
                             <input type="text" id="filter-audit-dst" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 8.8.8.8">
                         </div>
                         <div class="form-group" style="flex: 1; min-width: 100px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">連接埠 (Port)</label>
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">Port 埠號</label>
                             <input type="number" id="filter-audit-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
                         </div>
                         <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
-                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">旗標 (Flag)</label>
+                            <label style="display: block; margin-bottom: 4px; font-size: 0.78rem; color: var(--text-muted);">標記旗標</label>
                             <select id="filter-audit-flag" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">所有旗標</option>
+                                <option value="">所有標記</option>
                                 <option value="watch">關注 (Watch)</option>
                                 <option value="anomaly">異常 (Anomaly)</option>
                             </select>
@@ -904,28 +1038,26 @@
                         </div>
                     </div>
 
-                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow-y: auto;">
-                        <table class="data-table" id="audit-matches-table" style="min-width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                    <div class="card-body no-padding table-responsive" style="max-height: 500px; overflow: auto;">
+                        <table class="data-table" id="audit-matches-table" style="min-width: 1420px; border-collapse: collapse; font-size: 0.85rem;">
                             <thead style="position: sticky; top: 0; background: #1f2937; z-index: 2; border-bottom: 1px solid var(--border-color);">
                                 <tr>
-                                    <th class="sortable sort-active" data-sort="match_ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">盤查時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
-                                    <th class="sortable" data-sort="ts" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="match_flag" style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 70px;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="rule_ip" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 IP 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="rule_port" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">匹配 Port 規則 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="src" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="sport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="dst" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="dport" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="proto" style="padding: 10px 12px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="packets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 50px;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th class="sortable" data-sort="octets" style="padding: 10px 12px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 80px;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
-                                    <th style="padding: 10px 12px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937; width: 60px;">操作</th>
+                                    <th class="sortable sort-active" data-sort="ts" style="min-width: 155px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量時間 <i class="sort-icon" data-lucide="chevron-down"></i></th>
+                                    <th class="sortable" data-sort="match_flag" style="min-width: 75px; padding: 10px 14px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937;">旗標 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="exporter" style="min-width: 160px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">收集器 IP (Collector IP) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="src" style="min-width: 170px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="sport" style="min-width: 95px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">來源 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dst" style="min-width: 170px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">目的 IP (Domain) <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="dport" style="min-width: 95px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">目的 Port <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="proto" style="min-width: 75px; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); background: #1f2937;">協定 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="packets" style="min-width: 85px; padding: 10px 14px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">封包 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th class="sortable" data-sort="octets" style="min-width: 100px; padding: 10px 14px; text-align: right; font-weight: 600; color: var(--text-muted); background: #1f2937;">流量大小 <i class="sort-icon" data-lucide="chevrons-up-down"></i></th>
+                                    <th style="min-width: 75px; padding: 10px 14px; text-align: center; font-weight: 600; color: var(--text-muted); background: #1f2937;">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="audit-matches-tbody">
                                 <tr>
-                                    <td colspan="12" class="text-center text-muted py-5" style="padding: 40px 0;">無任何存檔資料。</td>
+                                    <td colspan="11" class="text-center text-muted py-5" style="padding: 40px 0;">無任何存檔資料。</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -934,7 +1066,7 @@
             </section>
 
             <!-- Settings - Collector Ports View -->
-            <section id="view-collector-settings" class="dashboard-view" style="padding: 20px; display: none;">
+            <section id="view-collector-settings" class="dashboard-view" style="padding: 20px;">
                 <div style="max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
                     
                     <!-- Page Header Card -->
@@ -1007,6 +1139,108 @@
 
                         <div id="collector-settings-status" style="margin-top: 20px; padding: 12px 16px; border-radius: 8px; font-size: 0.85rem; display: none;"></div>
                     </div>
+
+                    <!-- Card 2: Allowed Collector Exporter CIDR Whitelist -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 28px;">
+                        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 16px; margin-bottom: 20px;">
+                            <h3 style="font-size: 1.15rem; font-weight: 600; margin: 0 0 6px 0; color: var(--text-primary); display: flex; align-items: center; gap: 10px;">
+                                <i data-lucide="shield-check" style="color: #34d399; width: 22px; height: 22px;"></i>
+                                <span>允許接收來源 IP / CIDR 白名單 (Allowed Exporter Whitelist)</span>
+                            </h3>
+                            <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0; line-height: 1.5;">
+                                設定允許傳送 NetFlow / IPFIX 流量的來源 Exporter IP 位址或 CIDR 網段（例如 <code>192.168.10.0/24</code>、<code>10.10.1.5</code>）。
+                                <strong>若白名單為空，系統預設允許接收來自任何 IP 的流量封包</strong>；若有設定白名單，非允許來源的 UDP 封包將直接在接收端捨棄。
+                            </p>
+                        </div>
+
+                        <!-- Add CIDR Form -->
+                        <form id="form-add-collector-cidr" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 20px;">
+                            <div style="flex: 1; min-width: 220px;">
+                                <label for="input-new-collector-cidr" style="display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">來源 IP 或 CIDR 網段：</label>
+                                <input type="text" id="input-new-collector-cidr" class="form-control select-dark" placeholder="例如 192.168.10.0/24 或 10.0.0.1" required style="width: 100%; font-family: var(--font-mono);">
+                            </div>
+                            <div style="flex: 1.2; min-width: 240px;">
+                                <label for="input-new-collector-cidr-desc" style="display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">備註說明 (選填)：</label>
+                                <input type="text" id="input-new-collector-cidr-desc" class="form-control select-dark" placeholder="例如 核心交換機 01 / 總部邊界防火牆" style="width: 100%;">
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="btn-add-collector-cidr" style="height: 40px; padding: 0 18px; display: flex; align-items: center; gap: 6px;">
+                                <i data-lucide="plus"></i>
+                                <span>新增至白名單</span>
+                            </button>
+                        </form>
+
+                        <div id="collector-cidrs-status" style="margin-bottom: 16px; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; display: none;"></div>
+
+                        <!-- CIDR Whitelist Table -->
+                        <div class="table-container" style="border: 1px solid var(--border-color); border-radius: 8px; overflow: auto;">
+                            <table style="min-width: 650px; width: 100%; border-collapse: collapse; font-size: 0.88rem; white-space: nowrap;">
+                                <thead>
+                                    <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border-color);">
+                                        <th style="padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 220px;">CIDR 網段 / IP</th>
+                                        <th style="padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted);">備註說明</th>
+                                        <th style="padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 180px;">建立時間 (TW)</th>
+                                        <th style="padding: 10px 14px; text-align: center; font-weight: 600; color: var(--text-muted); width: 90px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="collector-cidrs-tbody">
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted" style="padding: 30px 0;">載入中...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings - User Management View -->
+            <section id="view-user-management" class="dashboard-view" style="padding: 20px;">
+                <div style="max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+                    
+                    <!-- Header Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 24px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+                            <div>
+                                <h3 style="font-size: 1.2rem; font-weight: 600; margin: 0 0 6px 0; color: var(--text-primary); display: flex; align-items: center; gap: 10px;">
+                                    <i data-lucide="users" style="color: var(--color-primary); width: 24px; height: 24px;"></i>
+                                    <span>系統帳號管理 (User & Account Management)</span>
+                                </h3>
+                                <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+                                    管理系統登入帳號、權限角色 (管理員 / 一般檢視者)、帳號啟用狀態與密碼重設。
+                                </p>
+                            </div>
+                            <button class="btn btn-primary" id="btn-open-add-user" style="height: 40px; padding: 0 18px; display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="user-plus"></i>
+                                <span>新增使用者</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- User Table Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); padding: 24px;">
+                        <div id="users-status-message" style="margin-bottom: 16px; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; display: none;"></div>
+                        
+                        <div class="table-container" style="border: 1px solid var(--border-color); border-radius: 8px; overflow: auto;">
+                            <table style="min-width: 900px; width: 100%; border-collapse: collapse; font-size: 0.88rem; white-space: nowrap;">
+                                <thead>
+                                    <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border-color);">
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 140px;">帳號名稱</th>
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 130px;">角色</th>
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 110px;">帳號狀態</th>
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 150px;">密碼狀態</th>
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 170px;">上次登入時間 (TW)</th>
+                                        <th style="padding: 12px 14px; text-align: left; font-weight: 600; color: var(--text-muted); width: 170px;">建立時間 (TW)</th>
+                                        <th style="padding: 12px 14px; text-align: center; font-weight: 600; color: var(--text-muted); width: 130px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="users-tbody">
+                                    <tr>
+                                        <td colspan="7" class="text-center text-muted" style="padding: 30px 0;">載入使用者列表中...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </section>
         </main>
@@ -1016,60 +1250,85 @@
     <div id="details-modal" class="modal-overlay">
         <div class="modal-container">
             <div class="modal-header">
-                <h3>Flow Log Details</h3>
+                <h3>Flow 流量詳細資訊</h3>
                 <button class="btn-close" id="btn-close-modal">
                     <i data-lucide="x"></i>
                 </button>
             </div>
             <div class="modal-body">
+                <!-- Matched Rule Info Block (hidden by default for normal flows) -->
+                <div id="detail-rule-section" style="display: none; margin-bottom: 20px; padding: 14px 16px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 8px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px;">
+                        <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600; color: #818cf8; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="shield-alert" style="width: 16px; height: 16px;"></i>
+                            <span>命中規則資訊 (Matched Rule Info)</span>
+                        </h4>
+                        <span id="detail-match-flag" class="badge"></span>
+                    </div>
+                    <div class="details-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div class="detail-item">
+                            <span class="label">匹配 IP 規則</span>
+                            <span class="value" id="detail-rule-ip" style="color: #a5b4fc; font-weight: 600;"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">匹配 Port 規則</span>
+                            <span class="value" id="detail-rule-port" style="color: #a5b4fc; font-weight: 600;"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">盤查時間 (UTC+8)</span>
+                            <span class="value" id="detail-match-ts" style="font-family: var(--font-mono); color: var(--text-secondary);"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="details-grid">
                     <div class="detail-item">
                         <span class="label">ID</span>
                         <span class="value" id="detail-id"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Time (UTC)</span>
+                        <span class="label">時間戳記</span>
                         <span class="value" id="detail-ts"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Collector Protocol</span>
+                        <span class="label">收集協定</span>
                         <span class="value badge badge-info" id="detail-type"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Exporter Address</span>
+                        <span class="label">收集器 (Collector IP)</span>
                         <span class="value" id="detail-exporter"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Source IP</span>
+                        <span class="label">來源 IP</span>
                         <span class="value" id="detail-src" style="font-weight: 600;"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Source Domain</span>
+                        <span class="label">來源網域名稱</span>
                         <span class="value text-muted" id="detail-src-domain"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Destination IP</span>
+                        <span class="label">目的 IP</span>
                         <span class="value" id="detail-dst" style="font-weight: 600;"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Destination Domain</span>
+                        <span class="label">目的網域名稱</span>
                         <span class="value text-muted" id="detail-dst-domain"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">IP Protocol</span>
+                        <span class="label">IP 通訊協定</span>
                         <span class="value badge badge-success" id="detail-proto"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Total Octets (Bytes)</span>
+                        <span class="label">總傳輸量 (Bytes)</span>
                         <span class="value" id="detail-octets"></span>
                     </div>
                     <div class="detail-item">
-                        <span class="label">Total Packets</span>
+                        <span class="label">總封包數</span>
                         <span class="value" id="detail-packets"></span>
                     </div>
                 </div>
 
-                <h4 class="section-title">Raw JSON Payload (From Collector)</h4>
+                <h4 class="section-title">原始 JSON 封包資料 (Collector)</h4>
                 <pre class="code-block"><code id="detail-raw-json"></code></pre>
             </div>
         </div>
@@ -1129,6 +1388,228 @@
             </div>
         </div>
     </div>
+
+    <!-- Edit Audit Rule Modal -->
+    <div id="modal-edit-audit-rule" class="modal-overlay">
+        <div class="modal-container" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3 style="display: flex; align-items: center; gap: 8px; font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin: 0;">
+                    <i data-lucide="edit-3" style="color: var(--color-primary); width: 20px; height: 20px;"></i>
+                    <span>編輯盤查規則</span>
+                </h3>
+                <button class="btn-close" id="btn-close-edit-rule-modal" type="button">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding-top: 15px;">
+                <form id="form-edit-audit-rule" style="display: flex; flex-direction: column; gap: 16px;">
+                    <input type="hidden" id="edit-rule-id">
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div class="form-group" style="margin: 0; display: flex; flex-direction: column; gap: 8px;">
+                            <label for="edit-rule-select-ip-type" style="display: block; margin-bottom: 2px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">IP / CIDR 類型與範圍</label>
+                            <select id="edit-rule-select-ip-type" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);">
+                                <option value="">任意 IP (Any)</option>
+                                <option value="internal">Private IP (192.168.x / 172.16.x / 10.x)</option>
+                                <option value="external">Public IP (Internet)</option>
+                                <option value="custom">自訂 IP / CIDR</option>
+                            </select>
+                            <input type="text" id="edit-rule-input-ip" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); display: none;" placeholder="例: 192.168.10.12 或 /24">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label for="edit-rule-input-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">Port 或 範圍 (選填)</label>
+                            <input type="text" id="edit-rule-input-port" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: var(--text-primary);" placeholder="例: 80 或 80-443">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.82rem; color: var(--text-primary);">比對旗標 (必選)</label>
+                        <div style="display: flex; gap: 20px; align-items: center; padding: 8px 0;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; color: var(--text-secondary); margin: 0;">
+                                <input type="radio" name="edit-rule-input-flag" value="watch" style="accent-color: var(--color-primary);"> 關注 (Watch)
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; color: var(--text-secondary); margin: 0;">
+                                <input type="radio" name="edit-rule-input-flag" value="anomaly" style="accent-color: var(--color-danger);"> 異常 (Anomaly)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="edit-rule-error-message" style="display: none; padding: 8px 12px; border-radius: 6px; font-size: 0.82rem; background: rgba(239, 68, 68, 0.15); color: var(--color-danger); border: 1px solid rgba(239, 68, 68, 0.3);"></div>
+
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 5px;">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-edit-rule" style="height: 38px; border-radius: 6px;">取消</button>
+                        <button type="submit" class="btn btn-primary" id="btn-save-edit-rule" style="height: 38px; border-radius: 6px; font-weight: 500;">儲存修改</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div id="modal-add-user" class="modal-overlay">
+        <div class="modal-container" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3>新增系統使用者</h3>
+                <button class="btn-close" id="btn-close-add-user-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding-top: 15px;">
+                <form id="form-add-user" style="display: flex; flex-direction: column; gap: 16px;">
+                    <div class="form-group">
+                        <label for="input-new-user-name" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">帳號名稱：</label>
+                        <input type="text" id="input-new-user-name" class="form-control select-dark" required placeholder="例如 ops_user" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-new-user-password" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">初始密碼：</label>
+                        <input type="password" id="input-new-user-password" class="form-control select-dark" required placeholder="至少 6 碼" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="select-new-user-role" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">權限角色：</label>
+                        <select id="select-new-user-role" class="form-control select-dark" style="width: 100%;">
+                            <option value="user">一般檢視者 (user)</option>
+                            <option value="admin">系統管理員 (admin)</option>
+                        </select>
+                    </div>
+                    <div id="add-user-error" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"></div>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-add-user" style="height: 38px;">取消</button>
+                        <button type="submit" class="btn btn-primary" style="height: 38px;">確認建立</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset User Password Modal (Admin) -->
+    <div id="modal-reset-user-password" class="modal-overlay">
+        <div class="modal-container" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3>重設使用者密碼</h3>
+                <button class="btn-close" id="btn-close-reset-pwd-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding-top: 15px;">
+                <form id="form-reset-user-password" style="display: flex; flex-direction: column; gap: 16px;">
+                    <input type="hidden" id="reset-target-user-id">
+                    <div style="font-size: 0.88rem; color: var(--text-secondary);">
+                        即將重設使用者 <strong id="reset-target-username" style="color: var(--text-primary);"></strong> 之密碼：
+                    </div>
+                    <div class="form-group">
+                        <label for="input-admin-new-pwd" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">新密碼：</label>
+                        <input type="password" id="input-admin-new-pwd" class="form-control select-dark" required placeholder="至少 6 碼" style="width: 100%;">
+                    </div>
+                    <div id="reset-pwd-error" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"></div>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-reset-pwd" style="height: 38px;">取消</button>
+                        <button type="submit" class="btn btn-danger" style="height: 38px;">確認重設</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Own Password Modal -->
+    <div id="modal-change-password" class="modal-overlay">
+        <div class="modal-container" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3>修改個人密碼</h3>
+                <button class="btn-close" id="btn-close-change-pwd-modal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding-top: 15px;">
+                <form id="form-change-own-password" style="display: flex; flex-direction: column; gap: 16px;">
+                    <div class="form-group">
+                        <label for="input-current-pwd" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">目前舊密碼：</label>
+                        <input type="password" id="input-current-pwd" class="form-control select-dark" required style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-new-own-pwd" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">設定新密碼：</label>
+                        <input type="password" id="input-new-own-pwd" class="form-control select-dark" required placeholder="至少 6 碼" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-new-own-pwd-confirm" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">確認新密碼：</label>
+                        <input type="password" id="input-new-own-pwd-confirm" class="form-control select-dark" required placeholder="再次輸入新密碼" style="width: 100%;">
+                    </div>
+                    <div id="change-pwd-error" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"></div>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel-change-pwd" style="height: 38px;">取消</button>
+                        <button type="submit" class="btn btn-primary" style="height: 38px;">確認修改</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mandatory Change Password Modal (First Login) -->
+    <div id="modal-must-change-password" class="modal-overlay" style="z-index: 10001;">
+        <div class="modal-container" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3 style="color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="shield-alert" style="width: 20px; height: 20px;"></i>
+                    <span>首次登入安全設定</span>
+                </h3>
+            </div>
+            <div class="modal-body" style="padding-top: 15px;">
+                <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px;">
+                    您目前使用的是預設初始密碼，為確保系統整體資訊安全，請立即變更您的登入密碼後再開始使用。
+                </p>
+                <form id="form-must-change-password" style="display: flex; flex-direction: column; gap: 16px;">
+                    <div class="form-group">
+                        <label for="input-force-old-pwd" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">目前預設密碼 (例如 admin123)：</label>
+                        <input type="password" id="input-force-old-pwd" class="form-control select-dark" required style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-force-new-pwd" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">設定新密碼：</label>
+                        <input type="password" id="input-force-new-pwd" class="form-control select-dark" required placeholder="至少 6 碼" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="input-force-new-pwd-confirm" style="display: block; font-size: 0.88rem; font-weight: 500; margin-bottom: 6px;">確認新密碼：</label>
+                        <input type="password" id="input-force-new-pwd-confirm" class="form-control select-dark" required placeholder="再次輸入新密碼" style="width: 100%;">
+                    </div>
+                    <div id="force-pwd-error" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"></div>
+                    <button type="submit" class="btn btn-primary" style="height: 42px; margin-top: 10px; font-weight: 600;">更新密碼並進入系統</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Screen View (Fullscreen Overlay) -->
+    <div id="view-login" style="display: none; position: fixed; inset: 0; z-index: 9999; background: radial-gradient(circle at 50% 30%, #1e1b4b 0%, #09090b 100%); align-items: center; justify-content: center; padding: 20px;">
+        <div class="card" style="width: 100%; max-width: 420px; background: rgba(24, 24, 27, 0.85); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 16px; backdrop-filter: blur(20px); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); padding: 36px 32px;">
+            <div style="text-align: center; margin-bottom: 28px;">
+                <div style="width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, #6366f1, #3b82f6); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.5);">
+                    <i data-lucide="shield" style="width: 32px; height: 32px; color: #fff;"></i>
+                </div>
+                <h2 style="font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin: 0 0 6px 0;">NetFlow Collector</h2>
+                <p style="font-size: 0.88rem; color: #94a3b8; margin: 0;">網路流量即時分析與資安盤查系統</p>
+            </div>
+
+            <form id="form-login" style="display: flex; flex-direction: column; gap: 18px;">
+                <div class="form-group">
+                    <label for="login-username" style="display: block; font-size: 0.88rem; font-weight: 500; color: #e2e8f0; margin-bottom: 6px;">帳號：</label>
+                    <input type="text" id="login-username" class="form-control select-dark" required autocomplete="username" placeholder="請輸入使用者帳號" style="width: 100%; height: 42px; font-size: 0.95rem;">
+                </div>
+                <div class="form-group">
+                    <label for="login-password" style="display: block; font-size: 0.88rem; font-weight: 500; color: #e2e8f0; margin-bottom: 6px;">密碼：</label>
+                    <input type="password" id="login-password" class="form-control select-dark" required autocomplete="current-password" placeholder="請輸入密碼" style="width: 100%; height: 42px; font-size: 0.95rem;">
+                </div>
+
+                <div id="login-error-message" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"></div>
+
+                <button type="submit" class="btn btn-primary" id="btn-do-login" style="height: 44px; margin-top: 8px; font-weight: 600; font-size: 1rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i data-lucide="log-in" style="width: 18px; height: 18px;"></i>
+                    <span>登入系統</span>
+                </button>
+            </form>
+            <div style="text-align: center; margin-top: 24px; font-size: 0.78rem; color: #64748b;">
+                預設管理員帳號: <code>admin</code> / 密碼: <code>admin123</code>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Context Menu for Interactive Filter -->
+    <div id="chart-context-menu" class="chart-context-menu" style="display: none;"></div>
 
     <!-- Custom Script -->
     <script src="app.js"></script>

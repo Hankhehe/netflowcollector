@@ -6,17 +6,112 @@ import threading
 import clickhouse_connect
 import ipaddress
 import time
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict, Any, Iterable, Tuple
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request, Response, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+# Standard Taiwan Timezone (UTC+8)
+TW_TZ = ZoneInfo("Asia/Taipei")
+
+def now_tw() -> datetime:
+    """Return current timezone-aware datetime in Asia/Taipei."""
+    return datetime.now(TW_TZ)
+
+def now_tw_str() -> str:
+    """Return current datetime string in Asia/Taipei formatted as YYYY-MM-DD HH:MM:SS."""
+    return now_tw().strftime("%Y-%m-%d %H:%M:%S")
+
+def parse_tw_datetime(dt_str: str) -> datetime:
+    """Parse datetime string and ensure it is timezone-aware in Asia/Taipei."""
+    if not dt_str:
+        return now_tw()
+    clean_str = str(dt_str).strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(clean_str, fmt)
+            return dt.replace(tzinfo=TW_TZ)
+        except ValueError:
+            continue
+    try:
+        dt = datetime.fromisoformat(clean_str)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=TW_TZ)
+        return dt.astimezone(TW_TZ)
+    except Exception:
+        return now_tw()
+
 app = FastAPI(title="Netflow Collector Web UI")
 
 DB_PATH = os.getenv("SQLITE_DB_PATH", "flows.db")
+
+# ---------------- Authentication Utilities ----------------
+def hash_password(password: str, salt: str) -> str:
+    """Hash password using PBKDF2 HMAC SHA-256."""
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+
+def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
+    """Verify session token from SQLite. Returns user dict if valid and unexpired."""
+    if not token:
+        return None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.token, s.user_id, s.username, s.role, s.expires_at, u.is_active, u.must_change_password
+            FROM user_sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.token = ?
+        """, (token,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        
+        token_str, user_id, username, role, expires_at_str, is_active, must_change_password = row
+        if not is_active:
+            return None
+            
+        expires_at = parse_tw_datetime(expires_at_str)
+        if now_tw() > expires_at:
+            delete_session(token)
+            return None
+            
+        return {
+            "id": user_id,
+            "username": username,
+            "role": role,
+            "must_change_password": bool(must_change_password)
+        }
+    except Exception as e:
+        print(f"[Auth] Error verifying session token: {e}")
+        return None
+
+def delete_session(token: str):
+    """Delete a session token from SQLite."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def get_current_user_from_request(request: Request) -> Optional[Dict[str, Any]]:
+    """Extract and verify session user from request cookie or Authorization header."""
+    token = request.cookies.get("session_token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+    return verify_session_token(token) if token else None
 
 ch_thread_local = threading.local()
 
@@ -58,8 +153,8 @@ def _resolve_and_save(ip: str):
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         cur = conn.cursor()
         cur.execute(
-            "INSERT OR REPLACE INTO dns_cache (ip, domain, last_resolved) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (ip, hostname)
+            "INSERT OR REPLACE INTO dns_cache (ip, domain, last_resolved) VALUES (?, ?, ?)",
+            (ip, hostname, now_tw_str())
         )
         conn.commit()
         conn.close()
@@ -83,7 +178,7 @@ def get_dns_mappings(ips: set) -> Dict[str, str]:
         return {}
     
     dns_map = {}
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = now_tw()
     
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -106,7 +201,7 @@ def get_dns_mappings(ips: set) -> Dict[str, str]:
             fresh = True
             if last_resolved_str:
                 try:
-                    last_resolved = datetime.strptime(last_resolved_str, "%Y-%m-%d %H:%M:%S")
+                    last_resolved = parse_tw_datetime(last_resolved_str)
                     if now - last_resolved > timedelta(days=1):
                         fresh = False
                 except Exception:
@@ -392,14 +487,66 @@ def init_db():
         cur.execute("""CREATE TABLE IF NOT EXISTS system_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            updated_at DATETIME
         )""")
-        cur.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('netflow_port', '2055')")
-        cur.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('ipfix_port', '4739')")
+        
+        tw_now = now_tw_str()
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('netflow_port', '2055', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('ipfix_port', '4739', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_days', '7', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_schedule_time', '03:00', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_enabled', '1', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_last_run', '', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_next_run', '', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_last_status', 'never', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_last_message', '排程尚未執行', ?)", (tw_now,))
+
+        # Initialize users table
+        cur.execute("""CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            role TEXT DEFAULT 'admin',
+            is_active INTEGER DEFAULT 1,
+            must_change_password INTEGER DEFAULT 0,
+            created_at DATETIME,
+            last_login DATETIME
+        )""")
+        
+        # Initialize user sessions table
+        cur.execute("""CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            role TEXT NOT NULL,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        
+        # Initialize collector allowed CIDRs table
+        cur.execute("""CREATE TABLE IF NOT EXISTS collector_allowed_cidrs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cidr TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at DATETIME
+        )""")
+        
+        # Pre-populate default admin user if none exists
+        cur.execute("SELECT COUNT(*) FROM users")
+        if cur.fetchone()[0] == 0:
+            salt = secrets.token_hex(16)
+            pwd_hash = hash_password("admin123", salt)
+            cur.execute("""
+                INSERT INTO users (username, password_hash, salt, role, is_active, must_change_password, created_at)
+                VALUES ('admin', ?, ?, 'admin', 1, 1, ?)
+            """, (pwd_hash, salt, tw_now))
+            print("[Startup Init] Default admin user initialized (admin / admin123, must_change_password=1).")
         
         conn.commit()
         conn.close()
-        print("[Startup Init] SQLite DNS cache, port, IP aliases, audit, and system settings tables initialized successfully.")
+        print("[Startup Init] SQLite tables (users, sessions, allowed CIDRs, system settings) initialized successfully.")
         
         load_port_aliases()
         load_ip_aliases()
@@ -462,7 +609,27 @@ def init_clickhouse_tables(client=None):
         TTL ts + INTERVAL 7 DAY
         """)
         
-        client.command("""
+        retention_days = int(get_system_setting("retention_days", "7"))
+        client.command(f"""
+        CREATE TABLE IF NOT EXISTS ipfix (
+            id String,
+            exporter String,
+            proto String,
+            src String,
+            dst String,
+            sport UInt16,
+            dport UInt16,
+            packets UInt64,
+            octets UInt64,
+            protocol Nullable(UInt16),
+            json_data String,
+            ts DateTime DEFAULT now()
+        ) ENGINE = MergeTree()
+        ORDER BY (ts, exporter, src, dst)
+        TTL ts + INTERVAL {retention_days} DAY
+        """)
+        
+        client.command(f"""
         CREATE TABLE IF NOT EXISTS netflow9 (
             id String,
             exporter String,
@@ -478,7 +645,7 @@ def init_clickhouse_tables(client=None):
             ts DateTime DEFAULT now()
         ) ENGINE = MergeTree()
         ORDER BY (ts, exporter, src, dst)
-        TTL ts + INTERVAL 7 DAY
+        TTL ts + INTERVAL {retention_days} DAY
         """)
         
         # Initialize matched_flows table (without TTL)
@@ -486,12 +653,12 @@ def init_clickhouse_tables(client=None):
         
         # Ensure TTL is applied to existing tables if they were created without it
         try:
-            client.command("ALTER TABLE ipfix MODIFY TTL ts + INTERVAL 7 DAY")
-            client.command("ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL 7 DAY")
+            client.command(f"ALTER TABLE ipfix MODIFY TTL ts + INTERVAL {retention_days} DAY")
+            client.command(f"ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL {retention_days} DAY")
         except Exception as alter_err:
             print(f"[Startup Init] Warning altering ClickHouse TTL: {alter_err}")
             
-        print("[Startup Init] ClickHouse database tables initialized successfully.")
+        print(f"[Startup Init] ClickHouse database tables initialized successfully ({retention_days}-day TTL).")
     except Exception as e:
         print(f"[Startup Init] Error initializing ClickHouse tables: {e}")
 
@@ -511,18 +678,538 @@ def set_system_setting(key: str, value: str):
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO system_settings (key, value, updated_at) 
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
-    """, (key, value))
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+    """, (key, value, now_tw_str()))
     conn.commit()
     conn.close()
+
+# ---------------- Retention Policy & Scheduler Logic ----------------
+def calculate_next_retention_run(schedule_time_str: str, last_run_str: str = "") -> datetime:
+    """Calculate the next scheduled run datetime in TW_TZ."""
+    now = now_tw()
+    try:
+        parts = schedule_time_str.split(":")
+        hour, minute = int(parts[0]), int(parts[1])
+    except Exception:
+        hour, minute = 3, 0
+    
+    target_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    if now < target_today:
+        return target_today
+    else:
+        # Check if already ran today
+        if last_run_str:
+            try:
+                last_dt = parse_tw_datetime(last_run_str)
+                if last_dt >= target_today:
+                    return target_today + timedelta(days=1)
+            except Exception:
+                pass
+        # Missed today's run or not yet run -> trigger now
+        return now
+
+def run_retention_cleanup() -> Dict[str, Any]:
+    """Execute retention policy deletion in ClickHouse and update SQLite status."""
+    try:
+        days = int(get_system_setting("retention_days", "7"))
+        current_tw = now_tw()
+        cutoff_dt = current_tw - timedelta(days=days)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
+        client = get_ch_client()
+        client.command("ALTER TABLE ipfix DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
+        client.command("ALTER TABLE netflow9 DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
+        
+        # Dynamically align ClickHouse table TTL
+        try:
+            client.command(f"ALTER TABLE ipfix MODIFY TTL ts + INTERVAL {days} DAY")
+            client.command(f"ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL {days} DAY")
+        except Exception as ttl_err:
+            print(f"[Retention] Warning updating ClickHouse TTL: {ttl_err}")
+            
+        run_ts_str = current_tw.strftime("%Y-%m-%d %H:%M:%S")
+        set_system_setting("retention_last_run", run_ts_str)
+        set_system_setting("retention_last_status", "success")
+        msg = f"排程清理成功完成：已清除 {cutoff_str} 以前（保留 {days} 天）之流量資料。"
+        set_system_setting("retention_last_message", msg)
+        print(f"[Retention] {msg}", flush=True)
+        return {"status": "success", "message": msg, "cutoff": cutoff_str, "last_run": run_ts_str}
+    except Exception as e:
+        err_msg = f"排程清理失敗: {e}"
+        set_system_setting("retention_last_status", "failed")
+        set_system_setting("retention_last_message", err_msg)
+        print(f"[Retention] {err_msg}", flush=True)
+        return {"status": "failed", "message": err_msg}
+
+def retention_scheduler_loop():
+    """Background thread checking retention schedule periodically in Asia/Taipei timezone."""
+    print("[Retention] Background retention scheduler thread started.", flush=True)
+    try:
+        time.sleep(10)
+    except Exception:
+        pass
+    while True:
+        try:
+            enabled = get_system_setting("retention_enabled", "1") == "1"
+            if enabled:
+                schedule_time = get_system_setting("retention_schedule_time", "03:00")
+                last_run_str = get_system_setting("retention_last_run", "")
+                next_run_str = get_system_setting("retention_next_run", "")
+                
+                if not next_run_str:
+                    next_dt = calculate_next_retention_run(schedule_time, last_run_str)
+                    next_run_str = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    set_system_setting("retention_next_run", next_run_str)
+                
+                next_run_dt = parse_tw_datetime(next_run_str)
+                current_tw = now_tw()
+                
+                # Check if current time is greater than or equal to next scheduled run time
+                if current_tw >= next_run_dt:
+                    print(f"[Retention] Current TW time ({current_tw.strftime('%Y-%m-%d %H:%M:%S')}) >= Next run ({next_run_str}). Executing scheduled cleanup...", flush=True)
+                    run_retention_cleanup()
+                    
+                    # Schedule next run for tomorrow at specified schedule_time
+                    try:
+                        parts = schedule_time.split(":")
+                        h, m = int(parts[0]), int(parts[1])
+                    except Exception:
+                        h, m = 3, 0
+                    next_target = current_tw.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=1)
+                    set_system_setting("retention_next_run", next_target.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception as e:
+            print(f"[Retention] Scheduler error: {e}", flush=True)
+            
+        time.sleep(30)
 
 @app.on_event("startup")
 def on_startup():
     init_db()
     # Start background daily traffic audit scheduler
-    t = threading.Thread(target=audit_scheduler_loop, daemon=True)
-    t.start()
+    t1 = threading.Thread(target=audit_scheduler_loop, daemon=True)
+    t1.start()
+    # Start background retention cleanup scheduler
+    t2 = threading.Thread(target=retention_scheduler_loop, daemon=True)
+    t2.start()
+
+# ---------------- Request Models ----------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"  # "admin" or "user"
+
+class UpdateUserRequest(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class ResetUserPasswordRequest(BaseModel):
+    new_password: str
+
+class AllowedCidrRequest(BaseModel):
+    cidr: str
+    description: Optional[str] = ""
+
+class RetentionSettingsRequest(BaseModel):
+    retention_days: int = Field(..., ge=1, le=3650)
+    schedule_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    enabled: bool = True
+
+# ---------------- Authentication Middleware ----------------
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Public routes: static assets, root page, login & me check
+    if (
+        path in ("/", "/favicon.ico")
+        or path.startswith("/static/")
+        or path in ("/api/auth/login", "/api/auth/me")
+    ):
+        return await call_next(request)
+    
+    # Any other /api/* route requires authentication
+    if path.startswith("/api/"):
+        user = get_current_user_from_request(request)
+        if not user:
+            return JSONResponse(status_code=401, content={"detail": "未授權或連線逾期，請先登入系統。"})
+        request.state.user = user
+
+    return await call_next(request)
+
+# ---------------- Auth API Endpoints ----------------
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    """Check current login status and user profile."""
+    user = get_current_user_from_request(request)
+    if not user:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "user": user
+    }
+
+@app.post("/api/auth/login")
+def auth_login(payload: LoginRequest, response: Response):
+    """Log in user and issue session token."""
+    username = payload.username.strip()
+    password = payload.password
+    
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, password_hash, salt, role, is_active, must_change_password FROM users WHERE username = ?", (username,))
+    user_row = cur.fetchone()
+    
+    if not user_row:
+        conn.close()
+        raise HTTPException(status_code=401, detail="帳號或密碼錯誤。")
+        
+    if not user_row["is_active"]:
+        conn.close()
+        raise HTTPException(status_code=401, detail="此帳號已停用，請聯繫系統管理員。")
+        
+    computed_hash = hash_password(password, user_row["salt"])
+    if computed_hash != user_row["password_hash"]:
+        conn.close()
+        raise HTTPException(status_code=401, detail="帳號或密碼錯誤。")
+        
+    # Generate session token (7-day validity)
+    token = secrets.token_hex(32)
+    now_dt = now_tw()
+    expires_dt = now_dt + timedelta(days=7)
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    expires_str = expires_dt.strftime("%Y-%m-%d %H:%M:%S")
+    
+    cur.execute("""
+        INSERT INTO user_sessions (token, user_id, username, role, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (token, user_row["id"], user_row["username"], user_row["role"], expires_str, now_str))
+    
+    cur.execute("UPDATE users SET last_login = ? WHERE id = ?", (now_str, user_row["id"]))
+    conn.commit()
+    conn.close()
+    
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        max_age=7 * 86400,
+        httponly=True,
+        samesite="lax",
+        secure=False
+    )
+    
+    return {
+        "status": "success",
+        "token": token,
+        "user": {
+            "id": user_row["id"],
+            "username": user_row["username"],
+            "role": user_row["role"],
+            "must_change_password": bool(user_row["must_change_password"])
+        }
+    }
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request, response: Response):
+    """Log out current user and invalidate session."""
+    token = request.cookies.get("session_token")
+    if token:
+        delete_session(token)
+    response.delete_cookie("session_token")
+    return {"status": "success", "message": "已成功登出。"}
+
+@app.post("/api/auth/change-password")
+def auth_change_password(payload: ChangePasswordRequest, request: Request):
+    """Change current logged-in user password."""
+    user = getattr(request.state, "user", None) or get_current_user_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="請先登入。")
+        
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密碼長度至少需為 6 個字元。")
+        
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, password_hash, salt FROM users WHERE id = ?", (user["id"],))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="找不到使用者資料。")
+        
+    if hash_password(payload.old_password, row["salt"]) != row["password_hash"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="目前舊密碼輸入不正確。")
+        
+    new_salt = secrets.token_hex(16)
+    new_hash = hash_password(payload.new_password, new_salt)
+    cur.execute("""
+        UPDATE users 
+        SET password_hash = ?, salt = ?, must_change_password = 0 
+        WHERE id = ?
+    """, (new_hash, new_salt, user["id"]))
+    conn.commit()
+    conn.close()
+    
+    return {"status": "success", "message": "密碼已成功修改！"}
+
+# ---------------- User Management API (Admin Only) ----------------
+def verify_admin_request(request: Request):
+    user = getattr(request.state, "user", None) or get_current_user_from_request(request)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="權限不足，僅系統管理員可執行此管理操作。")
+    return user
+
+@app.get("/api/users")
+def get_users(request: Request):
+    verify_admin_request(request)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, username, role, is_active, must_change_password, created_at, last_login 
+        FROM users 
+        ORDER BY id ASC
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+@app.post("/api/users")
+def create_user(payload: CreateUserRequest, request: Request):
+    verify_admin_request(request)
+    uname = payload.username.strip()
+    if not uname or len(uname) < 3:
+        raise HTTPException(status_code=400, detail="帳號名稱長度至少需為 3 個字元。")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="密碼長度至少需為 6 個字元。")
+    role = "admin" if payload.role == "admin" else "user"
+    
+    salt = secrets.token_hex(16)
+    pwd_hash = hash_password(payload.password, salt)
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO users (username, password_hash, salt, role, is_active, must_change_password, created_at)
+            VALUES (?, ?, ?, ?, 1, 0, ?)
+        """, (uname, pwd_hash, salt, role, now_tw_str()))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"帳號 '{uname}' 已存在。")
+    conn.close()
+    return {"status": "success", "message": f"使用者 '{uname}' 已成功建立。"}
+
+@app.put("/api/users/{user_id}")
+def update_user(user_id: int, payload: UpdateUserRequest, request: Request):
+    current_admin = verify_admin_request(request)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, role, is_active FROM users WHERE id = ?", (user_id,))
+    target_user = cur.fetchone()
+    if not target_user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="找不到指定的使用者。")
+        
+    if target_user["username"] == "admin" and payload.is_active is False:
+        conn.close()
+        raise HTTPException(status_code=400, detail="不可停用預設 admin 管理員帳號。")
+        
+    updates = []
+    params = []
+    if payload.role in ("admin", "user"):
+        updates.append("role = ?")
+        params.append(payload.role)
+    if payload.is_active is not None:
+        updates.append("is_active = ?")
+        params.append(1 if payload.is_active else 0)
+        
+    if updates:
+        params.append(user_id)
+        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+    conn.close()
+    return {"status": "success", "message": "使用者資料更新成功。"}
+
+@app.post("/api/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, payload: ResetUserPasswordRequest, request: Request):
+    verify_admin_request(request)
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密碼長度至少需為 6 個字元。")
+        
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="找不到指定的使用者。")
+        
+    new_salt = secrets.token_hex(16)
+    new_hash = hash_password(payload.new_password, new_salt)
+    cur.execute("UPDATE users SET password_hash = ?, salt = ?, must_change_password = 0 WHERE id = ?", (new_hash, new_salt, user_id))
+    cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"已重設使用者 '{user[1]}' 之密碼。"}
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, request: Request):
+    current_admin = verify_admin_request(request)
+    if current_admin["id"] == user_id:
+        raise HTTPException(status_code=400, detail="不可刪除目前正在登入的管理員帳號。")
+        
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, username FROM users WHERE id = ?", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="找不到指定的使用者。")
+    if user["username"] == "admin":
+        conn.close()
+        raise HTTPException(status_code=400, detail="不可刪除系統預設之 admin 帳號。")
+        
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"使用者 '{user['username']}' 已成功刪除。"}
+
+# ---------------- Retention & Cleanup Settings API ----------------
+@app.get("/api/settings/retention")
+def get_retention_settings():
+    """Retrieve data retention policy configuration and scheduled execution status."""
+    try:
+        retention_days = int(get_system_setting("retention_days", "7"))
+        schedule_time = get_system_setting("retention_schedule_time", "03:00")
+        enabled = get_system_setting("retention_enabled", "1") == "1"
+        last_run = get_system_setting("retention_last_run", "")
+        next_run = get_system_setting("retention_next_run", "")
+        last_status = get_system_setting("retention_last_status", "never")
+        last_message = get_system_setting("retention_last_message", "排程尚未執行")
+        
+        if not next_run:
+            next_dt = calculate_next_retention_run(schedule_time, last_run)
+            next_run = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+            set_system_setting("retention_next_run", next_run)
+            
+        return {
+            "retention_days": retention_days,
+            "schedule_time": schedule_time,
+            "enabled": enabled,
+            "last_run": last_run or "尚未執行",
+            "next_run": next_run,
+            "last_status": last_status,
+            "last_message": last_message
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"讀取資料保留設定失敗: {e}")
+
+@app.post("/api/settings/retention")
+def update_retention_settings(payload: RetentionSettingsRequest):
+    """Update data retention days and scheduled execution time."""
+    try:
+        set_system_setting("retention_days", str(payload.retention_days))
+        set_system_setting("retention_schedule_time", payload.schedule_time)
+        set_system_setting("retention_enabled", "1" if payload.enabled else "0")
+        
+        # Calculate new next run
+        last_run = get_system_setting("retention_last_run", "")
+        next_dt = calculate_next_retention_run(payload.schedule_time, last_run)
+        next_run_str = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+        set_system_setting("retention_next_run", next_run_str)
+        
+        # Update ClickHouse TTL dynamically
+        client = get_ch_client()
+        try:
+            client.command(f"ALTER TABLE ipfix MODIFY TTL ts + INTERVAL {payload.retention_days} DAY")
+            client.command(f"ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL {payload.retention_days} DAY")
+        except Exception as ttl_err:
+            print(f"[Retention] Warning altering ClickHouse TTL: {ttl_err}")
+            
+        return {
+            "status": "success",
+            "message": f"資料保留政策已更新：保留 {payload.retention_days} 天，每日 {payload.schedule_time} 定時執行清理。",
+            "retention_days": payload.retention_days,
+            "schedule_time": payload.schedule_time,
+            "enabled": payload.enabled,
+            "next_run": next_run_str
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新資料保留設定失敗: {e}")
+
+@app.post("/api/flows/cleanup/execute-retention")
+def execute_retention_manual():
+    """Manually trigger retention cleanup according to the configured retention days."""
+    res = run_retention_cleanup()
+    if res.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=res.get("message"))
+    return res
+
+# ---------------- Collector Allowed CIDRs API ----------------
+@app.get("/api/settings/collector/cidrs")
+def get_collector_cidrs():
+    """Get list of allowed NetFlow / IPFIX exporter IP/CIDRs."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, cidr, description, created_at FROM collector_allowed_cidrs ORDER BY id ASC")
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"讀取收集器白名單失敗: {e}")
+
+@app.post("/api/settings/collector/cidrs")
+def add_collector_cidr(payload: AllowedCidrRequest):
+    """Add a new CIDR or IP to the collector allowed whitelist."""
+    raw_cidr = payload.cidr.strip()
+    if not raw_cidr:
+        raise HTTPException(status_code=400, detail="請輸入有效的 IP 或 CIDR 網段。")
+    try:
+        net = ipaddress.ip_network(raw_cidr, strict=False)
+        normalized_cidr = str(net)
+    except Exception:
+        raise HTTPException(status_code=400, detail="無效的 CIDR 格式，例如 192.168.10.0/24 或 10.0.0.1")
+        
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO collector_allowed_cidrs (cidr, description, created_at)
+            VALUES (?, ?, ?)
+        """, (normalized_cidr, payload.description.strip(), now_tw_str()))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"網段 '{normalized_cidr}' 已存在於白名單中。")
+    conn.close()
+    return {"status": "success", "message": f"已成功新增網段 '{normalized_cidr}' 至收集器允許白名單。"}
+
+@app.delete("/api/settings/collector/cidrs/{cidr_id}")
+def delete_collector_cidr(cidr_id: int):
+    """Remove a CIDR from the collector allowed whitelist."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM collector_allowed_cidrs WHERE id = ?", (cidr_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "已從收集器白名單移除該網段。"}
 
 @app.get("/api/exporters")
 def get_exporters():
@@ -578,8 +1265,10 @@ def update_collector_settings(payload: CollectorSettingsRequest):
 @app.get("/api/flows")
 def get_flows(
     table: str = Query("all", description="Table to search: 'all', 'ipfix', 'netflow9'"),
+    ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
@@ -600,10 +1289,17 @@ def get_flows(
         where_clauses = []
         params = {}
 
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
             where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -849,8 +1545,10 @@ def get_flows(
 @app.get("/api/flows/export")
 def export_flows(
     table: str = Query("all", description="Table to search: 'all', 'ipfix', 'netflow9'"),
+    ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
@@ -873,10 +1571,17 @@ def export_flows(
         where_clauses = []
         params = {}
 
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
             where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -1135,7 +1840,7 @@ def export_flows(
                 output.seek(0)
                 output.truncate(0)
 
-        filename = f"flow_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"flow_export_{now_tw().strftime('%Y%m%d_%H%M%S')}.csv"
         return StreamingResponse(
             csv_generator(),
             media_type="text/csv",
@@ -1151,8 +1856,10 @@ def export_flows(
 @app.get("/api/stats")
 def get_stats(
     table: str = Query("all", description="Table to search: 'all', 'ipfix', 'netflow9'"),
+    ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
@@ -1174,10 +1881,17 @@ def get_stats(
             if exp_parts:
                 where_clauses.append("exporter IN %(exporter_list)s")
                 params["exporter_list"] = tuple(exp_parts)
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
             where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+        if port is not None:
+            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+            params["port"] = port
         if sport is not None:
             where_clauses.append("sport = %(sport)s")
             params["sport"] = sport
@@ -1420,24 +2134,20 @@ def get_stats(
 @app.post("/api/flows/delete")
 def delete_flows_before(before: str = Query(..., description="Delete data before this datetime, format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")):
     try:
-        cutoff_dt = None
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-            try:
-                cutoff_dt = datetime.strptime(before, fmt)
-                break
-            except ValueError:
-                continue
-        
-        if not cutoff_dt:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
-            
+        cutoff_dt = parse_tw_datetime(before)
         cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
         
         client = get_ch_client()
         client.command("ALTER TABLE ipfix DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
         client.command("ALTER TABLE netflow9 DELETE WHERE ts < %(cutoff)s", parameters={"cutoff": cutoff_str})
         
-        return {"status": "success", "message": f"Successfully queued deletion mutation in ClickHouse for records older than {cutoff_str}."}
+        now_str = now_tw_str()
+        set_system_setting("retention_last_run", now_str)
+        set_system_setting("retention_last_status", "success")
+        msg = f"已成功佇列刪除在 {cutoff_str} (台灣時間) 之前的流量記錄。"
+        set_system_setting("retention_last_message", f"手動清理：{msg}")
+        
+        return {"status": "success", "message": msg, "last_run": now_str}
     except Exception as e:
         reset_ch_client()
         raise HTTPException(status_code=500, detail=str(e))
@@ -2007,35 +2717,26 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
             
         if start_time_str:
             try:
-                if 'T' in start_time_str:
-                    try:
-                        # Parsing from datetime-local ISO format: YYYY-MM-DDTHH:MM
-                        # Convert user's local UTC+8 time input to UTC naive datetime
-                        dt_local = datetime.fromisoformat(start_time_str)
-                        last_run_dt = dt_local - timedelta(hours=8)
-                    except Exception:
-                        last_run_dt = datetime.fromisoformat(start_time_str.replace('Z', '+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
-                else:
-                    last_run_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                last_run_dt = parse_tw_datetime(start_time_str)
             except Exception:
-                last_run_dt = datetime.utcnow() - timedelta(days=7)
+                last_run_dt = now_tw() - timedelta(days=7)
         else:
             cur.execute("SELECT run_ts FROM audit_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
             row = cur.fetchone()
             if row:
                 last_run_str = row["run_ts"]
                 try:
-                    last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    last_run_dt = datetime.utcnow() - timedelta(days=7)
+                    last_run_dt = parse_tw_datetime(last_run_str)
+                except Exception:
+                    last_run_dt = now_tw() - timedelta(days=7)
             else:
-                last_run_dt = datetime.utcnow() - timedelta(days=7)
+                last_run_dt = now_tw() - timedelta(days=7)
             
-        current_run_dt = datetime.now(timezone.utc)
+        current_run_dt = now_tw()
         last_run_str = last_run_dt.strftime("%Y-%m-%d %H:%M:%S")
         current_run_str = current_run_dt.strftime("%Y-%m-%d %H:%M:%S")
         
-        print(f"[Audit] Audit range: {last_run_str} to {current_run_str} (UTC)", flush=True)
+        print(f"[Audit] Audit range: {last_run_str} to {current_run_str} (Asia/Taipei)", flush=True)
         
         client = get_ch_client()
         # Guarantee matched_flows table exists
@@ -2078,8 +2779,6 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
                     flow = dict(zip(column_names, row_vals))
                     matching_rule = check_flow_match(flow, parsed_rules)
                     if matching_rule:
-                        if isinstance(flow.get("ts"), datetime):
-                            flow["ts"] = flow["ts"].replace(tzinfo=timezone.utc)
                         flow["rule_ip"] = matching_rule["ip_raw"]
                         flow["rule_port"] = matching_rule["port_raw"]
                         flow["match_flag"] = matching_rule["flag"]
@@ -2139,8 +2838,8 @@ def audit_scheduler_loop():
             should_run = False
             if row:
                 last_run_str = row[0]
-                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-                if datetime.utcnow() - last_run_dt >= timedelta(hours=24):
+                last_run_dt = parse_tw_datetime(last_run_str)
+                if now_tw() - last_run_dt >= timedelta(hours=24):
                     should_run = True
             else:
                 should_run = True
@@ -2157,6 +2856,11 @@ class AuditRuleCreate(BaseModel):
     port: Optional[str] = None
     flag: str
 
+class AuditRuleUpdate(BaseModel):
+    ip: Optional[str] = None
+    port: Optional[str] = None
+    flag: str
+
 @app.get("/api/audit/rules")
 def get_audit_rules():
     try:
@@ -2169,6 +2873,11 @@ def get_audit_rules():
         for rule in rules:
             ip = rule.get("ip")
             rule["ip_alias"] = resolve_ip_alias(ip) if ip else ""
+            port = rule.get("port")
+            try:
+                rule["port_name"] = port_aliases_cache.get(int(port), "") if port and str(port).isdigit() else ""
+            except Exception:
+                rule["port_name"] = ""
         return rules
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2205,6 +2914,10 @@ def import_audit_rules(payload: List[Dict[str, Any]]):
                 
             ip_val = str(ip).strip() if ip is not None else None
             port_val = str(port).strip() if port is not None else None
+            if ip_val == "":
+                ip_val = None
+            if port_val == "":
+                port_val = None
             
             if not ip_val and not port_val:
                 continue
@@ -2217,7 +2930,7 @@ def import_audit_rules(payload: List[Dict[str, Any]]):
             
         conn.commit()
         conn.close()
-        return {"status": "success", "message": f"Successfully imported {imported} audit rules."}
+        return {"status": "success", "message": f"成功匯入 {imported} 條盤查規則。"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2228,30 +2941,103 @@ def create_audit_rule(rule: AuditRuleCreate):
     flag_val = rule.flag.strip().lower()
     
     if flag_val not in ("watch", "anomaly"):
-        raise HTTPException(status_code=400, detail="Flag must be 'watch' or 'anomaly'")
+        raise HTTPException(status_code=400, detail="標記必須為 'watch' 或 'anomaly'")
         
     if not ip_val and not port_val:
-        raise HTTPException(status_code=400, detail="At least one of IP or Port must be provided.")
+        raise HTTPException(status_code=400, detail="IP 與 Port 至少需填寫其中一項。")
         
     if ip_val and not validate_ip_or_cidr(ip_val):
-        raise HTTPException(status_code=400, detail="Invalid IP or CIDR address format.")
+        raise HTTPException(status_code=400, detail="無效的 IP 或 CIDR 位址格式。")
         
     if port_val and not validate_port_or_range(port_val):
-        raise HTTPException(status_code=400, detail="Invalid Port or Port range format. Use e.g. '80' or '80-443'")
+        raise HTTPException(status_code=400, detail="無效的 Port 或 Port 範圍格式（例如 '80' 或 '80-443'）。")
         
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT id FROM audit_rules WHERE (ip IS ? OR ip = ?) AND (port IS ? OR port = ?)", 
-                    (ip_val, ip_val, port_val, port_val))
+        
+        if ip_val is None:
+            ip_clause = "(ip IS NULL OR ip = '')"
+            ip_params = []
+        else:
+            ip_clause = "ip = ?"
+            ip_params = [ip_val]
+
+        if port_val is None:
+            port_clause = "(port IS NULL OR port = '')"
+            port_params = []
+        else:
+            port_clause = "port = ?"
+            port_params = [port_val]
+
+        cur.execute(f"SELECT id FROM audit_rules WHERE {ip_clause} AND {port_clause}", ip_params + port_params)
         if cur.fetchone():
             conn.close()
-            raise HTTPException(status_code=400, detail="Rule already exists.")
+            raise HTTPException(status_code=400, detail="已存在相同 IP/CIDR 與 Port 的規則，不可重複設定。")
             
-        cur.execute("INSERT INTO audit_rules (ip, port, flag) VALUES (?, ?, ?)", (ip_val, port_val, flag_val))
+        cur.execute("INSERT INTO audit_rules (ip, port, flag, created_at) VALUES (?, ?, ?, ?)", (ip_val, port_val, flag_val, now_tw_str()))
         conn.commit()
         conn.close()
-        return {"status": "success", "message": "Audit rule created successfully."}
+        return {"status": "success", "message": "盤查規則新增成功。"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/audit/rules/{rule_id}")
+def update_audit_rule(rule_id: int, rule: AuditRuleUpdate):
+    ip_val = rule.ip.strip() if rule.ip else None
+    port_val = rule.port.strip() if rule.port else None
+    flag_val = rule.flag.strip().lower()
+    
+    if flag_val not in ("watch", "anomaly"):
+        raise HTTPException(status_code=400, detail="標記必須為 'watch' 或 'anomaly'")
+        
+    if not ip_val and not port_val:
+        raise HTTPException(status_code=400, detail="IP 與 Port 至少需填寫其中一項。")
+        
+    if ip_val and not validate_ip_or_cidr(ip_val):
+        raise HTTPException(status_code=400, detail="無效的 IP 或 CIDR 位址格式。")
+        
+    if port_val and not validate_port_or_range(port_val):
+        raise HTTPException(status_code=400, detail="無效的 Port 或 Port 範圍格式（例如 '80' 或 '80-443'）。")
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute("SELECT id FROM audit_rules WHERE id = ?", (rule_id,))
+        if not cur.fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="找不到欲修改的規則。")
+            
+        if ip_val is None:
+            ip_clause = "(ip IS NULL OR ip = '')"
+            ip_params = []
+        else:
+            ip_clause = "ip = ?"
+            ip_params = [ip_val]
+
+        if port_val is None:
+            port_clause = "(port IS NULL OR port = '')"
+            port_params = []
+        else:
+            port_clause = "port = ?"
+            port_params = [port_val]
+
+        cur.execute(f"SELECT id FROM audit_rules WHERE {ip_clause} AND {port_clause} AND id != ?", ip_params + port_params + [rule_id])
+        if cur.fetchone():
+            conn.close()
+            raise HTTPException(status_code=400, detail="已存在相同 IP/CIDR 與 Port 的規則，不可重複設定。")
+            
+        cur.execute("""
+            UPDATE audit_rules 
+            SET ip = ?, port = ?, flag = ?
+            WHERE id = ?
+        """, (ip_val, port_val, flag_val, rule_id))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "盤查規則已成功更新。"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2351,11 +3137,13 @@ def get_audit_status():
 
 @app.get("/api/audit/matches/stats")
 def get_audit_matches_stats(
+    ip: Optional[str] = Query(None),
     src: Optional[str] = Query(None),
     dst: Optional[str] = Query(None),
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
+    proto: Optional[str] = Query(None),
     flag: Optional[str] = Query(None)
 ):
     try:
@@ -2364,6 +3152,10 @@ def get_audit_matches_stats(
         where_clauses = []
         params = {}
         
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
@@ -2377,6 +3169,29 @@ def get_audit_matches_stats(
         if port is not None:
             where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
             params["port"] = port
+        if proto:
+            proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
+            proto_clauses = []
+            for idx, p in enumerate(proto_parts):
+                key = f"proto_p_{idx}"
+                params[key] = p
+                p_num = None
+                for num, name in PROTO_NAME_MAP.items():
+                    if name.upper() == p.upper():
+                        p_num = num
+                        break
+                if p_num is not None:
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = p_num
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                elif p.isdigit():
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = int(p)
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                else:
+                    proto_clauses.append(f"proto ILIKE %({key})s")
+            if proto_clauses:
+                where_clauses.append(f"({' OR '.join(proto_clauses)})")
         if flag:
             where_clauses.append("match_flag = %(flag)s")
             params["flag"] = flag.strip().lower()
@@ -2415,11 +3230,11 @@ def get_audit_matches_stats(
         top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
         # 4. Top Source Ports
+        where_sport = f"{where_sql} AND sport IS NOT NULL" if where_sql else "WHERE sport IS NOT NULL"
         res = client.query(f"""
             SELECT sport, SUM(octets) as bytes, COUNT() as flows
             FROM matched_flows
-            {where_sql}
-            WHERE sport IS NOT NULL
+            {where_sport}
             GROUP BY sport
             ORDER BY bytes DESC
             LIMIT 10
@@ -2427,11 +3242,11 @@ def get_audit_matches_stats(
         top_source_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
         # 5. Top Destination Ports
+        where_dport = f"{where_sql} AND dport IS NOT NULL" if where_sql else "WHERE dport IS NOT NULL"
         res = client.query(f"""
             SELECT dport, SUM(octets) as bytes, COUNT() as flows
             FROM matched_flows
-            {where_sql}
-            WHERE dport IS NOT NULL
+            {where_dport}
             GROUP BY dport
             ORDER BY bytes DESC
             LIMIT 10
@@ -2442,9 +3257,9 @@ def get_audit_matches_stats(
         res = client.query(f"""
             SELECT port, SUM(octets) as bytes, COUNT() as flows
             FROM (
-                SELECT sport as port, octets FROM matched_flows {where_sql} WHERE sport IS NOT NULL
+                SELECT sport as port, octets FROM matched_flows {where_sport}
                 UNION ALL
-                SELECT dport as port, octets FROM matched_flows {where_sql} WHERE dport IS NOT NULL
+                SELECT dport as port, octets FROM matched_flows {where_dport}
             )
             GROUP BY port
             ORDER BY bytes DESC
@@ -2570,11 +3385,13 @@ def get_audit_matches_stats(
 def get_audit_matches(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    ip: Optional[str] = Query(None),
     src: Optional[str] = Query(None),
     dst: Optional[str] = Query(None),
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
+    proto: Optional[str] = Query(None),
     flag: Optional[str] = Query(None),
     sort_by: str = Query("match_ts"),
     sort_order: str = Query("desc")
@@ -2585,6 +3402,10 @@ def get_audit_matches(
         where_clauses = []
         params = {}
         
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
@@ -2598,6 +3419,29 @@ def get_audit_matches(
         if port is not None:
             where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
             params["port"] = port
+        if proto:
+            proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
+            proto_clauses = []
+            for idx, p in enumerate(proto_parts):
+                key = f"proto_p_{idx}"
+                params[key] = p
+                p_num = None
+                for num, name in PROTO_NAME_MAP.items():
+                    if name.upper() == p.upper():
+                        p_num = num
+                        break
+                if p_num is not None:
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = p_num
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                elif p.isdigit():
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = int(p)
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                else:
+                    proto_clauses.append(f"proto ILIKE %({key})s")
+            if proto_clauses:
+                where_clauses.append(f"({' OR '.join(proto_clauses)})")
         if flag:
             where_clauses.append("match_flag = %(flag)s")
             params["flag"] = flag.strip().lower()
@@ -2613,10 +3457,10 @@ def get_audit_matches(
         # Validate sort field to prevent SQL injection
         allowed_cols = {
             "match_ts", "ts", "match_flag", "rule_ip", "rule_port",
-            "src", "sport", "dst", "dport", "proto", "packets", "octets"
+            "src", "sport", "dst", "dport", "proto", "packets", "octets", "exporter"
         }
         if sort_by not in allowed_cols:
-            sort_by = "match_ts"
+            sort_by = "ts"
             
         order_sql = "DESC" if sort_order.lower() == "desc" else "ASC"
         
@@ -2646,6 +3490,8 @@ def get_audit_matches(
                 ips_to_resolve.add(r["src"])
             if r.get("dst"):
                 ips_to_resolve.add(r["dst"])
+            if r.get("exporter"):
+                ips_to_resolve.add(r["exporter"])
                 
         # Get DNS and IP Aliases mappings in batch
         dns_map = get_dns_mappings(ips_to_resolve)
@@ -2653,8 +3499,10 @@ def get_audit_matches(
         for r in records:
             src_ip = r.get("src")
             dst_ip = r.get("dst")
+            exporter_ip = r.get("exporter")
             r["src_domain"] = alias_map.get(src_ip) or dns_map.get(src_ip, "")
             r["dst_domain"] = alias_map.get(dst_ip) or dns_map.get(dst_ip, "")
+            r["exporter_alias"] = alias_map.get(exporter_ip) or dns_map.get(exporter_ip, "")
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
             rule_ip = r.get("rule_ip")
@@ -2698,11 +3546,13 @@ def delete_single_audit_match(match_id: str):
 
 @app.get("/api/audit/matches/export")
 def export_audit_matches(
+    ip: Optional[str] = Query(None),
     src: Optional[str] = Query(None),
     dst: Optional[str] = Query(None),
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
+    proto: Optional[str] = Query(None),
     flag: Optional[str] = Query(None)
 ):
     import io
@@ -2715,6 +3565,10 @@ def export_audit_matches(
         where_clauses = []
         params = {}
         
+        if ip:
+            src_c = build_ip_where_clause("src", ip, params, "ip_src")
+            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+            where_clauses.append(f"({src_c} OR {dst_c})")
         if src:
             where_clauses.append(build_ip_where_clause("src", src, params, "src"))
         if dst:
@@ -2728,6 +3582,29 @@ def export_audit_matches(
         if port is not None:
             where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
             params["port"] = port
+        if proto:
+            proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
+            proto_clauses = []
+            for idx, p in enumerate(proto_parts):
+                key = f"proto_p_{idx}"
+                params[key] = p
+                p_num = None
+                for num, name in PROTO_NAME_MAP.items():
+                    if name.upper() == p.upper():
+                        p_num = num
+                        break
+                if p_num is not None:
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = p_num
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                elif p.isdigit():
+                    num_key = f"proto_num_{idx}"
+                    params[num_key] = int(p)
+                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                else:
+                    proto_clauses.append(f"proto ILIKE %({key})s")
+            if proto_clauses:
+                where_clauses.append(f"({' OR '.join(proto_clauses)})")
         if flag:
             where_clauses.append("match_flag = %(flag)s")
             params["flag"] = flag.strip().lower()
@@ -2755,6 +3632,8 @@ def export_audit_matches(
                 ips_to_resolve.add(r["src"])
             if r.get("dst"):
                 ips_to_resolve.add(r["dst"])
+            if r.get("exporter"):
+                ips_to_resolve.add(r["exporter"])
         dns_map = get_dns_mappings(ips_to_resolve)
         
         # CSV generator
@@ -2765,7 +3644,7 @@ def export_audit_matches(
             
             # CSV Headers
             headers = [
-                "Audit Time", "Flow Time", "Flag", "Matched IP Rule", "Matched Port Rule",
+                "Flow Time", "Flag", "Collector IP", "Collector IP Alias", "Audit Time", "Matched IP Rule", "Matched Port Rule",
                 "Source IP", "Source Domain", "Source Port", "Source Port Name",
                 "Destination IP", "Destination Domain", "Destination Port", "Destination Port Name",
                 "Protocol", "Packets", "Bytes"
@@ -2785,6 +3664,10 @@ def export_audit_matches(
                 # Flag translation
                 flag_val = "關注" if r["match_flag"] == "watch" else "異常"
                 
+                # Collector IP and alias
+                exporter_ip = r.get("exporter") or ""
+                exporter_alias = resolve_ip_alias(exporter_ip) or dns_map.get(exporter_ip, "")
+
                 # DNS and Aliases resolution
                 src_ip = r["src"]
                 dst_ip = r["dst"]
@@ -2799,7 +3682,7 @@ def export_audit_matches(
                 p_name = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})" if r["protocol"] is not None else "N/A")
                 rule_ip_val = f"{r['rule_ip']} ({resolve_ip_alias(r['rule_ip'])})" if r['rule_ip'] and resolve_ip_alias(r['rule_ip']) else (r['rule_ip'] or "(任意)")
                 row_data = [
-                    m_ts, f_ts, flag_val, rule_ip_val, r["rule_port"] or "(任意)",
+                    f_ts, flag_val, exporter_ip, exporter_alias, m_ts, rule_ip_val, r["rule_port"] or "(任意)",
                     src_ip, src_domain, sport_val, sport_name,
                     dst_ip, dst_domain, dport_val, dport_name,
                     p_name, r["packets"], r["octets"]

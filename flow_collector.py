@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import uuid
+import ipaddress
 from typing import Dict, Tuple, List, Any
 import clickhouse_connect
 
@@ -32,8 +33,25 @@ class ClickHouseWriter:
             password=self.ch_password
         )
         
-        # Verify / Create tables with TTL
-        self.client.command("""
+        # Determine retention days from settings
+        retention_days = 7
+        try:
+            import sqlite3
+            db_path = os.getenv("SQLITE_DB_PATH", "/data/flows.db")
+            if not os.path.exists(db_path): db_path = "flows.db"
+            if os.path.exists(db_path):
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute("SELECT value FROM system_settings WHERE key = 'retention_days'")
+                row = cur.fetchone()
+                if row and row[0]:
+                    retention_days = max(1, int(row[0]))
+                conn.close()
+        except Exception:
+            pass
+
+        # Verify / Create tables with dynamic TTL
+        self.client.command(f"""
         CREATE TABLE IF NOT EXISTS ipfix (
             id String,
             exporter String,
@@ -49,10 +67,10 @@ class ClickHouseWriter:
             ts DateTime DEFAULT now()
         ) ENGINE = MergeTree()
         ORDER BY (ts, exporter, src, dst)
-        TTL ts + INTERVAL 7 DAY
+        TTL ts + INTERVAL {retention_days} DAY
         """)
         
-        self.client.command("""
+        self.client.command(f"""
         CREATE TABLE IF NOT EXISTS netflow9 (
             id String,
             exporter String,
@@ -68,17 +86,17 @@ class ClickHouseWriter:
             ts DateTime DEFAULT now()
         ) ENGINE = MergeTree()
         ORDER BY (ts, exporter, src, dst)
-        TTL ts + INTERVAL 7 DAY
+        TTL ts + INTERVAL {retention_days} DAY
         """)
         
         # Ensure TTL is applied to existing tables if they were created without it
         try:
-            self.client.command("ALTER TABLE ipfix MODIFY TTL ts + INTERVAL 7 DAY")
-            self.client.command("ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL 7 DAY")
+            self.client.command(f"ALTER TABLE ipfix MODIFY TTL ts + INTERVAL {retention_days} DAY")
+            self.client.command(f"ALTER TABLE netflow9 MODIFY TTL ts + INTERVAL {retention_days} DAY")
         except Exception as alter_err:
             print(f"[ClickHouseWriter] Warning altering TTL: {alter_err}", file=sys.stderr)
             
-        print("[ClickHouseWriter] ClickHouse tables initialized with 7-day TTL.", file=sys.stderr)
+        print(f"[ClickHouseWriter] ClickHouse tables initialized with {retention_days}-day TTL.", file=sys.stderr)
 
     def run(self):
         while True:
@@ -235,6 +253,35 @@ def get_db_collector_ports(default_nf=2055, default_ipfix=4739):
     except Exception:
         return default_nf, default_ipfix
 
+def get_db_allowed_cidrs():
+    db_path = os.getenv("SQLITE_DB_PATH", "/data/flows.db")
+    if not os.path.exists(db_path):
+        db_path = "flows.db"
+    if not os.path.exists(db_path):
+        return []
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS collector_allowed_cidrs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cidr TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at DATETIME
+        )""")
+        cur.execute("SELECT cidr FROM collector_allowed_cidrs")
+        rows = [r[0].strip() for r in cur.fetchall() if r[0] and r[0].strip()]
+        conn.close()
+        networks = []
+        for r in rows:
+            try:
+                networks.append(ipaddress.ip_network(r, strict=False))
+            except Exception:
+                pass
+        return networks
+    except Exception:
+        return []
+
 class NetFlowV9Collector:
     def __init__(self, host: str, port: int, q: queue.Queue):
         self.host = host
@@ -242,6 +289,7 @@ class NetFlowV9Collector:
         self.q = q
         self.sock = None
         self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int]]]] = {}
+        self.allowed_cidrs = get_db_allowed_cidrs()
         self.bind_socket()
 
     def bind_socket(self):
@@ -265,6 +313,9 @@ class NetFlowV9Collector:
             self.port = new_port
             self.bind_socket()
 
+    def update_allowed_cidrs(self, new_cidrs):
+        self.allowed_cidrs = new_cidrs
+
     def run(self):
         while True:
             if not self.sock:
@@ -274,6 +325,13 @@ class NetFlowV9Collector:
                     continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
+                if self.allowed_cidrs:
+                    try:
+                        addr = ipaddress.ip_address(ip)
+                        if not any(addr in net for net in self.allowed_cidrs):
+                            continue
+                    except Exception:
+                        continue
                 self.handle_packet(ip, data)
             except socket.timeout:
                 continue
@@ -381,6 +439,7 @@ class IPFIXCollector:
         self.q = q
         self.sock = None
         self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int,int]]]] = {}
+        self.allowed_cidrs = get_db_allowed_cidrs()
         self.bind_socket()
 
     def bind_socket(self):
@@ -404,6 +463,9 @@ class IPFIXCollector:
             self.port = new_port
             self.bind_socket()
 
+    def update_allowed_cidrs(self, new_cidrs):
+        self.allowed_cidrs = new_cidrs
+
     def run(self):
         while True:
             if not self.sock:
@@ -413,6 +475,13 @@ class IPFIXCollector:
                     continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
+                if self.allowed_cidrs:
+                    try:
+                        addr = ipaddress.ip_address(ip)
+                        if not any(addr in net for net in self.allowed_cidrs):
+                            continue
+                    except Exception:
+                        continue
                 self.handle_packet(ip, data)
             except socket.timeout:
                 continue
@@ -500,6 +569,7 @@ class IPFIXCollector:
                     self.q.put(("ipfix", norm))
 
 def monitor_ports(nf_collector, ipfix_collector):
+    last_cidrs_str = None
     while True:
         try:
             time.sleep(3)
@@ -508,6 +578,14 @@ def monitor_ports(nf_collector, ipfix_collector):
                 nf_collector.update_port(db_nf)
             if db_ipfix != ipfix_collector.port:
                 ipfix_collector.update_port(db_ipfix)
+            
+            db_cidrs = get_db_allowed_cidrs()
+            curr_str = ",".join(sorted(str(c) for c in db_cidrs))
+            if curr_str != last_cidrs_str:
+                last_cidrs_str = curr_str
+                nf_collector.update_allowed_cidrs(db_cidrs)
+                ipfix_collector.update_allowed_cidrs(db_cidrs)
+                print(f"[Collector] Updated allowed CIDRs whitelist: {len(db_cidrs)} rule(s) active", file=sys.stderr)
         except Exception:
             time.sleep(3)
 

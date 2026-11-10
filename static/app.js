@@ -6,8 +6,12 @@ let state = {
     filters: {
         table: 'all',
         exporter: '',
+        ipDir: 'any',
+        ip: '',
         src: '',
         dst: '',
+        portDir: 'any',
+        port: '',
         sport: '',
         dport: '',
         proto: '',
@@ -41,9 +45,15 @@ let state = {
         flag: ''
     },
     anomaliesFilters: {
+        ipDir: 'any',
+        ip: '',
         src: '',
         dst: '',
+        portDir: 'any',
         port: '',
+        sport: '',
+        dport: '',
+        proto: '',
         flag: ''
     },
     sorting: {
@@ -51,7 +61,7 @@ let state = {
         order: 'desc'
     },
     auditSorting: {
-        by: 'match_ts',
+        by: 'ts',
         order: 'desc'
     },
     records: [], // Cache for current page records
@@ -107,6 +117,17 @@ const els = {
     inputImportRules: document.getElementById('input-import-rules'),
     btnClearRules: document.getElementById('btn-clear-rules'),
     
+    // Edit Audit Rule Modal
+    modalEditAuditRule: document.getElementById('modal-edit-audit-rule'),
+    btnCloseEditRuleModal: document.getElementById('btn-close-edit-rule-modal'),
+    btnCancelEditRule: document.getElementById('btn-cancel-edit-rule'),
+    formEditAuditRule: document.getElementById('form-edit-audit-rule'),
+    editRuleId: document.getElementById('edit-rule-id'),
+    editRuleSelectIpType: document.getElementById('edit-rule-select-ip-type'),
+    editRuleInputIp: document.getElementById('edit-rule-input-ip'),
+    editRuleInputPort: document.getElementById('edit-rule-input-port'),
+    editRuleErrorMessage: document.getElementById('edit-rule-error-message'),
+    
     // Audit Search / Table / Pagination
     auditPageSize: document.getElementById('audit-page-size'),
     btnClearAuditMatches: document.getElementById('btn-clear-audit-matches'),
@@ -127,9 +148,12 @@ const els = {
     anomaliesTotalFiltered: document.getElementById('anomalies-total-filtered'),
     anomaliesPagination: document.getElementById('anomalies-pagination'),
     anomaliesTbody: document.getElementById('anomalies-tbody'),
-    filterAnomaliesSrc: document.getElementById('filter-anomalies-src'),
-    filterAnomaliesDst: document.getElementById('filter-anomalies-dst'),
-    filterAnomaliesPort: document.getElementById('filter-anomalies-port'),
+    filterAnomaliesIpDir: document.getElementById('filter-anomalies-ip-dir'),
+    filterAnomaliesIpType: document.getElementById('filter-anomalies-ip-type'),
+    filterAnomaliesIpVal: document.getElementById('filter-anomalies-ip-val'),
+    filterAnomaliesPortDir: document.getElementById('filter-anomalies-port-dir'),
+    filterAnomaliesPortVal: document.getElementById('filter-anomalies-port-val'),
+    filterAnomaliesProto: document.getElementById('filter-anomalies-proto'),
     filterAnomaliesFlag: document.getElementById('filter-anomalies-flag'),
     btnApplyAnomaliesSearch: document.getElementById('btn-apply-anomalies-search'),
     btnResetAnomaliesSearch: document.getElementById('btn-reset-anomalies-search'),
@@ -146,12 +170,18 @@ const els = {
     
     // Filters Form
     filterForm: document.getElementById('filter-form'),
+    filterIpDir: document.getElementById('filter-ip-dir'),
+    filterIpType: document.getElementById('filter-ip-type'),
+    filterIpVal: document.getElementById('filter-ip-val'),
+    filterPortDir: document.getElementById('filter-port-dir'),
+    filterPortVal: document.getElementById('filter-port-val'),
     filterSrc: document.getElementById('filter-src'),
     filterDst: document.getElementById('filter-dst'),
     filterSport: document.getElementById('filter-sport'),
     filterDport: document.getElementById('filter-dport'),
     btnResetFilters: document.getElementById('btn-reset-filters'),
     filterProtoGroup: document.getElementById('filter-proto-group'),
+    chartContextMenu: document.getElementById('chart-context-menu'),
     
     // Table
     flowsTbody: document.getElementById('flows-tbody'),
@@ -164,6 +194,11 @@ const els = {
     // Modal
     detailsModal: document.getElementById('details-modal'),
     btnCloseModal: document.getElementById('btn-close-modal'),
+    detailRuleSection: document.getElementById('detail-rule-section'),
+    detailRuleIp: document.getElementById('detail-rule-ip'),
+    detailRulePort: document.getElementById('detail-rule-port'),
+    detailMatchFlag: document.getElementById('detail-match-flag'),
+    detailMatchTs: document.getElementById('detail-match-ts'),
     detailId: document.getElementById('detail-id'),
     detailTs: document.getElementById('detail-ts'),
     detailType: document.getElementById('detail-type'),
@@ -175,14 +210,133 @@ const els = {
     detailProto: document.getElementById('detail-proto'),
     detailOctets: document.getElementById('detail-octets'),
     detailPackets: document.getElementById('detail-packets'),
-    detailRawJson: document.getElementById('detail-raw-json')
+    detailRawJson: document.getElementById('detail-raw-json'),
+
+    // Users & New Settings Elements
+    btnTabUsers: document.getElementById('btn-tab-users'),
+    viewUserManagement: document.getElementById('view-user-management'),
+    inputRetentionDays: document.getElementById('input-retention-days'),
+    inputRetentionTime: document.getElementById('input-retention-time'),
+    selectRetentionEnabled: document.getElementById('select-retention-enabled'),
+    retentionLastRunTime: document.getElementById('retention-last-run-time'),
+    retentionNextRunTime: document.getElementById('retention-next-run-time'),
+    retentionLastMessage: document.getElementById('retention-last-message'),
+    retentionStatusBadge: document.getElementById('retention-status-badge'),
+    formRetentionSettings: document.getElementById('form-retention-settings'),
+    btnSaveRetention: document.getElementById('btn-save-retention'),
+    btnRunRetentionNow: document.getElementById('btn-run-retention-now'),
+    retentionStatusAlert: document.getElementById('retention-status-alert'),
+    formAddCollectorCidr: document.getElementById('form-add-collector-cidr'),
+    inputNewCollectorCidr: document.getElementById('input-new-collector-cidr'),
+    inputNewCollectorCidrDesc: document.getElementById('input-new-collector-cidr-desc'),
+    collectorCidrsStatus: document.getElementById('collector-cidrs-status'),
+    collectorCidrsTbody: document.getElementById('collector-cidrs-tbody'),
+    btnOpenAddUser: document.getElementById('btn-open-add-user'),
+    usersTbody: document.getElementById('users-tbody'),
+    usersStatusMessage: document.getElementById('users-status-message'),
+    viewLogin: document.getElementById('view-login'),
+    formLogin: document.getElementById('form-login'),
+    loginUsername: document.getElementById('login-username'),
+    loginPassword: document.getElementById('login-password'),
+    loginErrorMessage: document.getElementById('login-error-message'),
+    btnDoLogin: document.getElementById('btn-do-login'),
+    btnLogout: document.getElementById('btn-logout'),
+    btnOpenChangePwd: document.getElementById('btn-open-change-pwd'),
+    currentUsername: document.getElementById('current-username'),
+    currentUserRole: document.getElementById('current-user-role'),
+    userAvatarInitial: document.getElementById('user-avatar-initial'),
+    modalAddUser: document.getElementById('modal-add-user'),
+    formAddUser: document.getElementById('form-add-user'),
+    inputNewUserName: document.getElementById('input-new-user-name'),
+    inputNewUserPassword: document.getElementById('input-new-user-password'),
+    selectNewUserRole: document.getElementById('select-new-user-role'),
+    addUserError: document.getElementById('add-user-error'),
+    btnCloseAddUserModal: document.getElementById('btn-close-add-user-modal'),
+    btnCancelAddUser: document.getElementById('btn-cancel-add-user'),
+    modalResetUserPassword: document.getElementById('modal-reset-user-password'),
+    formResetUserPassword: document.getElementById('form-reset-user-password'),
+    resetTargetUserId: document.getElementById('reset-target-user-id'),
+    resetTargetUsername: document.getElementById('reset-target-username'),
+    inputAdminNewPwd: document.getElementById('input-admin-new-pwd'),
+    resetPwdError: document.getElementById('reset-pwd-error'),
+    btnCloseResetPwdModal: document.getElementById('btn-close-reset-pwd-modal'),
+    btnCancelResetPwd: document.getElementById('btn-cancel-reset-pwd'),
+    modalChangePassword: document.getElementById('modal-change-password'),
+    formChangeOwnPassword: document.getElementById('form-change-own-password'),
+    inputCurrentPwd: document.getElementById('input-current-pwd'),
+    inputNewOwnPwd: document.getElementById('input-new-own-pwd'),
+    inputNewOwnPwdConfirm: document.getElementById('input-new-own-pwd-confirm'),
+    changePwdError: document.getElementById('change-pwd-error'),
+    btnCloseChangePwdModal: document.getElementById('btn-close-change-pwd-modal'),
+    btnCancelChangePwd: document.getElementById('btn-cancel-change-pwd'),
+    modalMustChangePassword: document.getElementById('modal-must-change-password'),
+    formMustChangePassword: document.getElementById('form-must-change-password'),
+    inputForceOldPwd: document.getElementById('input-force-old-pwd'),
+    inputForceNewPwd: document.getElementById('input-force-new-pwd'),
+    inputForceNewPwdConfirm: document.getElementById('input-force-new-pwd-confirm'),
+    forcePwdError: document.getElementById('force-pwd-error')
 };
 
+// Sidebar Collapsible Mini-Mode Functions
+function initSidebarToggle() {
+    const sidebar = document.querySelector('.sidebar');
+    const toggleBtn = document.getElementById('btn-toggle-sidebar');
+    if (!sidebar || !toggleBtn) return;
+
+    // Check localStorage preference
+    const savedState = localStorage.getItem('sidebar-collapsed');
+    if (savedState === 'true') {
+        sidebar.classList.add('collapsed');
+        updateSidebarToggleBtn(true);
+    } else {
+        updateSidebarToggleBtn(false);
+    }
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const isCollapsed = sidebar.classList.toggle('collapsed');
+        localStorage.setItem('sidebar-collapsed', isCollapsed ? 'true' : 'false');
+        updateSidebarToggleBtn(isCollapsed);
+
+        setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+        }, 260);
+    });
+}
+
+function setSidebarCollapsed(collapsed) {
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return;
+    if (collapsed) {
+        sidebar.classList.add('collapsed');
+    } else {
+        sidebar.classList.remove('collapsed');
+    }
+    localStorage.setItem('sidebar-collapsed', collapsed ? 'true' : 'false');
+    updateSidebarToggleBtn(collapsed);
+    setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+    }, 260);
+}
+
+function updateSidebarToggleBtn(isCollapsed) {
+    const toggleBtn = document.getElementById('btn-toggle-sidebar');
+    if (!toggleBtn) return;
+    toggleBtn.title = isCollapsed ? '展開側邊欄' : '收合側邊欄';
+    const closeIcon = toggleBtn.querySelector('.toggle-icon-collapse');
+    const openIcon = toggleBtn.querySelector('.toggle-icon-expand');
+    if (closeIcon) closeIcon.style.display = isCollapsed ? 'none' : 'block';
+    if (openIcon) openIcon.style.display = isCollapsed ? 'block' : 'none';
+}
+
 // Initialization
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Re-initialize Lucide Icons
-    lucide.createIcons();
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        lucide.createIcons();
+    }
     
+    initSidebarToggle();
     setupEventListeners();
     setupHeaderSorting();
     updateHeaderSortIcons();
@@ -190,18 +344,47 @@ document.addEventListener('DOMContentLoaded', () => {
     updateAuditHeaderSortIcons();
     setupColumnToggles();
     setupDropdowns();
-    fetchExporterDropdown();
-    fetchPortAliases();
-    fetchIpAliases();
-    switchTab('anomalies');
+    
+    // Check authentication first
+    const isAuth = await checkAuth();
+    if (isAuth) {
+        fetchExporterDropdown();
+        fetchPortAliases();
+        fetchIpAliases();
+        switchTab('anomalies');
+    }
 });
 
 // Setup Event Listeners
 function setupEventListeners() {
-    // IP Type Select Show/Hide Inputs
+    // IP Type Select Show/Hide Inputs for General
+    const filterIpType = document.getElementById('filter-ip-type');
+    const filterIpVal = document.getElementById('filter-ip-val');
+    if (filterIpType && filterIpVal) {
+        filterIpType.addEventListener('change', () => {
+            filterIpVal.style.display = filterIpType.value === 'custom' ? 'block' : 'none';
+            if (filterIpType.value !== 'custom') {
+                filterIpVal.value = '';
+            }
+        });
+    }
+
+    // IP Type Select Show/Hide Inputs for Anomalies
+    const filterAnomaliesIpType = document.getElementById('filter-anomalies-ip-type');
+    const filterAnomaliesIpVal = document.getElementById('filter-anomalies-ip-val');
+    if (filterAnomaliesIpType && filterAnomaliesIpVal) {
+        filterAnomaliesIpType.addEventListener('change', () => {
+            filterAnomaliesIpVal.style.display = filterAnomaliesIpType.value === 'custom' ? 'block' : 'none';
+            if (filterAnomaliesIpType.value !== 'custom') {
+                filterAnomaliesIpVal.value = '';
+            }
+        });
+    }
+
+    // Legacy IP Type fallback handlers
     const filterSrcType = document.getElementById('filter-src-type');
     const filterSrcInput = document.getElementById('filter-src');
-    if (filterSrcType && filterSrcInput) {
+    if (filterSrcType && filterSrcInput && filterSrcInput.type !== 'hidden') {
         filterSrcType.addEventListener('change', () => {
             filterSrcInput.style.display = filterSrcType.value === 'custom' ? 'block' : 'none';
             if (filterSrcType.value !== 'custom') {
@@ -212,7 +395,7 @@ function setupEventListeners() {
 
     const filterDstType = document.getElementById('filter-dst-type');
     const filterDstInput = document.getElementById('filter-dst');
-    if (filterDstType && filterDstInput) {
+    if (filterDstType && filterDstInput && filterDstInput.type !== 'hidden') {
         filterDstType.addEventListener('change', () => {
             filterDstInput.style.display = filterDstType.value === 'custom' ? 'block' : 'none';
             if (filterDstType.value !== 'custom') {
@@ -232,27 +415,18 @@ function setupEventListeners() {
         });
     }
 
-    const filterAnomaliesSrcType = document.getElementById('filter-anomalies-src-type');
-    const filterAnomaliesSrc = document.getElementById('filter-anomalies-src');
-    if (filterAnomaliesSrcType && filterAnomaliesSrc) {
-        filterAnomaliesSrcType.addEventListener('change', () => {
-            filterAnomaliesSrc.style.display = filterAnomaliesSrcType.value === 'custom' ? 'block' : 'none';
-            if (filterAnomaliesSrcType.value !== 'custom') {
-                filterAnomaliesSrc.value = '';
-            }
-        });
-    }
-
-    const filterAnomaliesDstType = document.getElementById('filter-anomalies-dst-type');
-    const filterAnomaliesDst = document.getElementById('filter-anomalies-dst');
-    if (filterAnomaliesDstType && filterAnomaliesDst) {
-        filterAnomaliesDstType.addEventListener('change', () => {
-            filterAnomaliesDst.style.display = filterAnomaliesDstType.value === 'custom' ? 'block' : 'none';
-            if (filterAnomaliesDstType.value !== 'custom') {
-                filterAnomaliesDst.value = '';
-            }
-        });
-    }
+    // Close chart context menu on click outside or Escape
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('chart-context-menu');
+        if (menu && menu.style.display !== 'none' && !e.target.closest('#chart-context-menu')) {
+            hideChartContextMenu();
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            hideChartContextMenu();
+        }
+    });
 
     // Tabs Navigation
     els.btnTabExplorer.addEventListener('click', (e) => {
@@ -275,6 +449,10 @@ function setupEventListeners() {
     if (els.btnTabSettingsTrigger) {
         els.btnTabSettingsTrigger.addEventListener('click', (e) => {
             e.preventDefault();
+            const sidebar = document.querySelector('.sidebar');
+            if (sidebar && sidebar.classList.contains('collapsed')) {
+                setSidebarCollapsed(false);
+            }
             const submenu = document.querySelector('#menu-settings .submenu');
             const chevron = els.btnTabSettingsTrigger.querySelector('.chevron-icon');
             if (submenu) {
@@ -315,6 +493,110 @@ function setupEventListeners() {
         });
     }
 
+    if (els.btnTabUsers) {
+        els.btnTabUsers.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('users');
+        });
+    }
+
+    // Retention Policy Listeners
+    if (els.formRetentionSettings) {
+        els.formRetentionSettings.addEventListener('submit', (e) => {
+            e.preventDefault();
+            saveRetentionSettings();
+        });
+    }
+
+    if (els.btnRunRetentionNow) {
+        els.btnRunRetentionNow.addEventListener('click', () => {
+            runRetentionNow();
+        });
+    }
+
+    // Collector CIDR Listeners
+    if (els.formAddCollectorCidr) {
+        els.formAddCollectorCidr.addEventListener('submit', (e) => {
+            e.preventDefault();
+            addCollectorCidr();
+        });
+    }
+
+    // User Management Listeners
+    if (els.btnOpenAddUser) {
+        els.btnOpenAddUser.addEventListener('click', () => {
+            openAddUserModal();
+        });
+    }
+
+    if (els.btnCloseAddUserModal) {
+        els.btnCloseAddUserModal.addEventListener('click', closeAddUserModal);
+    }
+    if (els.btnCancelAddUser) {
+        els.btnCancelAddUser.addEventListener('click', closeAddUserModal);
+    }
+    if (els.formAddUser) {
+        els.formAddUser.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitCreateUser();
+        });
+    }
+
+    // User Password Reset Modal Listeners
+    if (els.btnCloseResetPwdModal) {
+        els.btnCloseResetPwdModal.addEventListener('click', closeResetPwdModal);
+    }
+    if (els.btnCancelResetPwd) {
+        els.btnCancelResetPwd.addEventListener('click', closeResetPwdModal);
+    }
+    if (els.formResetUserPassword) {
+        els.formResetUserPassword.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitResetUserPassword();
+        });
+    }
+
+    // Change Own Password Modal Listeners
+    if (els.btnOpenChangePwd) {
+        els.btnOpenChangePwd.addEventListener('click', () => {
+            openChangePwdModal();
+        });
+    }
+    if (els.btnCloseChangePwdModal) {
+        els.btnCloseChangePwdModal.addEventListener('click', closeChangePwdModal);
+    }
+    if (els.btnCancelChangePwd) {
+        els.btnCancelChangePwd.addEventListener('click', closeChangePwdModal);
+    }
+    if (els.formChangeOwnPassword) {
+        els.formChangeOwnPassword.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitChangeOwnPassword();
+        });
+    }
+
+    // Force Password Change Listener (First login)
+    if (els.formMustChangePassword) {
+        els.formMustChangePassword.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitForceChangePassword();
+        });
+    }
+
+    // Auth Login & Logout
+    if (els.formLogin) {
+        els.formLogin.addEventListener('submit', (e) => {
+            e.preventDefault();
+            handleLogin();
+        });
+    }
+
+    if (els.btnLogout) {
+        els.btnLogout.addEventListener('click', () => {
+            handleLogout();
+        });
+    }
+
     if (els.formCollectorSettings) {
         els.formCollectorSettings.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -328,6 +610,31 @@ function setupEventListeners() {
             submitAuditRule();
         });
     }
+
+    // Edit Audit Rule Modal listeners
+    if (els.editRuleSelectIpType && els.editRuleInputIp) {
+        els.editRuleSelectIpType.addEventListener('change', () => {
+            els.editRuleInputIp.style.display = els.editRuleSelectIpType.value === 'custom' ? 'block' : 'none';
+            if (els.editRuleSelectIpType.value !== 'custom') {
+                els.editRuleInputIp.value = '';
+            }
+        });
+    }
+
+    if (els.btnCloseEditRuleModal) {
+        els.btnCloseEditRuleModal.addEventListener('click', closeEditRuleModal);
+    }
+    if (els.btnCancelEditRule) {
+        els.btnCancelEditRule.addEventListener('click', closeEditRuleModal);
+    }
+    if (els.formEditAuditRule) {
+        els.formEditAuditRule.addEventListener('submit', submitEditAuditRule);
+    }
+    window.addEventListener('click', (e) => {
+        if (els.modalEditAuditRule && e.target === els.modalEditAuditRule) {
+            closeEditRuleModal();
+        }
+    });
 
     if (els.btnTriggerAudit) {
         els.btnTriggerAudit.addEventListener('click', () => {
@@ -461,49 +768,37 @@ function setupEventListeners() {
 
     if (els.btnApplyAnomaliesSearch) {
         els.btnApplyAnomaliesSearch.addEventListener('click', () => {
-            const srcTypeEl = document.getElementById('filter-anomalies-src-type');
-            if (srcTypeEl && srcTypeEl.value !== 'custom') {
-                state.anomaliesFilters.src = srcTypeEl.value;
-            } else {
-                state.anomaliesFilters.src = els.filterAnomaliesSrc.value.trim();
-            }
-
-            const dstTypeEl = document.getElementById('filter-anomalies-dst-type');
-            if (dstTypeEl && dstTypeEl.value !== 'custom') {
-                state.anomaliesFilters.dst = dstTypeEl.value;
-            } else {
-                state.anomaliesFilters.dst = els.filterAnomaliesDst.value.trim();
-            }
-
-            state.anomaliesFilters.port = els.filterAnomaliesPort.value.trim();
-            state.anomaliesFilters.flag = els.filterAnomaliesFlag.value;
+            applyAnomaliesFiltersFromForm();
             state.anomaliesPagination.offset = 0;
             fetchAnomalousReport();
+            fetchAnomalousReportStats();
         });
     }
 
     if (els.btnResetAnomaliesSearch) {
         els.btnResetAnomaliesSearch.addEventListener('click', () => {
-            const srcTypeEl = document.getElementById('filter-anomalies-src-type');
-            if (srcTypeEl) {
-                srcTypeEl.value = '';
-                els.filterAnomaliesSrc.style.display = 'none';
+            const aIpDirEl = document.getElementById('filter-anomalies-ip-dir');
+            if (aIpDirEl) aIpDirEl.value = 'any';
+            const aIpTypeEl = document.getElementById('filter-anomalies-ip-type');
+            if (aIpTypeEl) aIpTypeEl.value = '';
+            const aIpValEl = document.getElementById('filter-anomalies-ip-val');
+            if (aIpValEl) {
+                aIpValEl.value = '';
+                aIpValEl.style.display = 'none';
             }
-            const dstTypeEl = document.getElementById('filter-anomalies-dst-type');
-            if (dstTypeEl) {
-                dstTypeEl.value = '';
-                els.filterAnomaliesDst.style.display = 'none';
-            }
-            els.filterAnomaliesSrc.value = '';
-            els.filterAnomaliesDst.value = '';
-            els.filterAnomaliesPort.value = '';
-            els.filterAnomaliesFlag.value = '';
-            state.anomaliesFilters.src = '';
-            state.anomaliesFilters.dst = '';
-            state.anomaliesFilters.port = '';
-            state.anomaliesFilters.flag = '';
+            const aPortDirEl = document.getElementById('filter-anomalies-port-dir');
+            if (aPortDirEl) aPortDirEl.value = 'any';
+            const aPortValEl = document.getElementById('filter-anomalies-port-val');
+            if (aPortValEl) aPortValEl.value = '';
+            const aProtoEl = document.getElementById('filter-anomalies-proto');
+            if (aProtoEl) aProtoEl.value = '';
+            const aFlagEl = document.getElementById('filter-anomalies-flag');
+            if (aFlagEl) aFlagEl.value = '';
+            
+            applyAnomaliesFiltersFromForm();
             state.anomaliesPagination.offset = 0;
             fetchAnomalousReport();
+            fetchAnomalousReportStats();
         });
     }
 
@@ -511,9 +806,13 @@ function setupEventListeners() {
         els.btnExportAnomalies.addEventListener('click', () => {
             let url = `/api/audit/matches/export?`;
             const params = [];
+            if (state.anomaliesFilters.ip) params.push(`ip=${encodeURIComponent(state.anomaliesFilters.ip)}`);
             if (state.anomaliesFilters.src) params.push(`src=${encodeURIComponent(state.anomaliesFilters.src)}`);
             if (state.anomaliesFilters.dst) params.push(`dst=${encodeURIComponent(state.anomaliesFilters.dst)}`);
             if (state.anomaliesFilters.port) params.push(`port=${encodeURIComponent(state.anomaliesFilters.port)}`);
+            if (state.anomaliesFilters.sport) params.push(`sport=${encodeURIComponent(state.anomaliesFilters.sport)}`);
+            if (state.anomaliesFilters.dport) params.push(`dport=${encodeURIComponent(state.anomaliesFilters.dport)}`);
+            if (state.anomaliesFilters.proto) params.push(`proto=${encodeURIComponent(state.anomaliesFilters.proto)}`);
             if (state.anomaliesFilters.flag) params.push(`flag=${encodeURIComponent(state.anomaliesFilters.flag)}`);
             window.open(url + params.join('&'), '_blank');
         });
@@ -540,9 +839,9 @@ function setupEventListeners() {
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                showAuditRuleStatus('Audit rules backup file downloaded successfully', 'success');
+                showAuditRuleStatus('盤查規則備份檔已成功下載', 'success');
             } catch (err) {
-                showAuditRuleStatus(`Export failed: ${err.message}`, 'error');
+                showAuditRuleStatus(`匯出失敗: ${err.message}`, 'error');
             }
         });
     }
@@ -561,7 +860,7 @@ function setupEventListeners() {
                 try {
                     const payload = JSON.parse(event.target.result);
                     if (!Array.isArray(payload)) {
-                        throw new Error('Invalid backup file format (expected a JSON array of rules)');
+                        throw new Error('無效的備份檔格式（需為規則的 JSON 陣列）');
                     }
 
                     const res = await fetch('/api/audit/rules/import', {
@@ -572,13 +871,13 @@ function setupEventListeners() {
                     const data = await res.json();
                     
                     if (res.ok) {
-                        showAuditRuleStatus(data.message || 'Import successful', 'success');
+                        showAuditRuleStatus(data.message || '匯入成功', 'success');
                         fetchAuditRules(); // Reload rule table
                     } else {
-                        showAuditRuleStatus(data.detail || 'Import failed', 'error');
+                        showAuditRuleStatus(data.detail || '匯入失敗', 'error');
                     }
                 } catch (err) {
-                    showAuditRuleStatus(`Import parse error: ${err.message}`, 'error');
+                    showAuditRuleStatus(`解析匯入檔案失敗: ${err.message}`, 'error');
                 }
                 // Reset file input value to allow importing the same file again
                 els.inputImportRules.value = '';
@@ -633,14 +932,14 @@ function setupEventListeners() {
     const globalEnd = document.getElementById('global-end-time');
     
     globalStart.addEventListener('change', () => {
-        state.filters.startTime = toUtcTimestamp(globalStart.value);
+        state.filters.startTime = toTaiwanLocalTimestamp(globalStart.value);
         state.pagination.offset = 0; // Reset pagination
         updateTimeRangeSubtitle();
         refreshData();
     });
     
     globalEnd.addEventListener('change', () => {
-        state.filters.endTime = toUtcTimestamp(globalEnd.value);
+        state.filters.endTime = toTaiwanLocalTimestamp(globalEnd.value);
         state.pagination.offset = 0; // Reset pagination
         updateTimeRangeSubtitle();
         refreshData();
@@ -667,7 +966,22 @@ function setupEventListeners() {
     
     els.btnResetFilters.addEventListener('click', () => {
         els.filterForm.reset();
-        // Hide custom IP inputs upon reset
+        // Reset direction-aware IP & Port fields
+        const filterIpDir = document.getElementById('filter-ip-dir');
+        if (filterIpDir) filterIpDir.value = 'any';
+        const filterIpType = document.getElementById('filter-ip-type');
+        if (filterIpType) filterIpType.value = '';
+        const filterIpValInput = document.getElementById('filter-ip-val');
+        if (filterIpValInput) {
+            filterIpValInput.value = '';
+            filterIpValInput.style.display = 'none';
+        }
+        const filterPortDir = document.getElementById('filter-port-dir');
+        if (filterPortDir) filterPortDir.value = 'any';
+        const filterPortValInput = document.getElementById('filter-port-val');
+        if (filterPortValInput) filterPortValInput.value = '';
+
+        // Hide legacy custom IP inputs if present
         const filterSrcInput = document.getElementById('filter-src');
         const filterDstInput = document.getElementById('filter-dst');
         if (filterSrcInput) filterSrcInput.style.display = 'none';
@@ -679,6 +993,8 @@ function setupEventListeners() {
         updateDropdownLabels();
         state.pagination.offset = 0;
         refreshData();
+        fetchFlows();
+        fetchStats();
     });
     
     // Page size dropdown
@@ -768,9 +1084,9 @@ function setupEventListeners() {
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                showIpAliasStatus('Aliases backup file downloaded successfully', 'success');
+                showIpAliasStatus('別名備份檔已成功下載', 'success');
             } catch (err) {
-                showIpAliasStatus(`Export failed: ${err.message}`, 'error');
+                showIpAliasStatus(`匯出失敗: ${err.message}`, 'error');
             }
         });
     }
@@ -789,7 +1105,7 @@ function setupEventListeners() {
                 try {
                     const payload = JSON.parse(event.target.result);
                     if (!payload.ip_aliases || !payload.port_aliases) {
-                        throw new Error('Invalid backup file format (missing ip_aliases or port_aliases)');
+                        throw new Error('無效的備份檔格式（缺少 ip_aliases 或 port_aliases）');
                     }
 
                     const res = await fetch('/api/aliases/import', {
@@ -808,7 +1124,7 @@ function setupEventListeners() {
                     fetchPortAliases();
                     fetchFlows();
                 } catch (err) {
-                    showIpAliasStatus(`Import failed: ${err.message}`, 'error');
+                    showIpAliasStatus(`匯入失敗: ${err.message}`, 'error');
                 } finally {
                     // Reset input
                     inputImportAliases.value = '';
@@ -821,7 +1137,7 @@ function setupEventListeners() {
     const btnClearAliases = document.getElementById('btn-clear-aliases');
     if (btnClearAliases) {
         btnClearAliases.addEventListener('click', async () => {
-            if (!confirm('Are you sure you want to delete ALL custom IP and Port aliases? This cannot be undone.')) return;
+            if (!confirm('您確定要清空所有自訂 IP 與 Port 別名嗎？此動作將無法復原。')) return;
             
             try {
                 const res = await fetch('/api/aliases/clear', { method: 'POST' });
@@ -835,7 +1151,7 @@ function setupEventListeners() {
                 fetchPortAliases();
                 fetchFlows();
             } catch (err) {
-                showIpAliasStatus(`Clear failed: ${err.message}`, 'error');
+                showIpAliasStatus(`清除失敗: ${err.message}`, 'error');
             }
         });
     }
@@ -877,7 +1193,7 @@ function switchTab(tabName) {
     state.activeTab = tabName;
     
     // Hide filter card if settings/report tabs are active
-    const isSettingsTab = ['data-management', 'aliases', 'audit', 'anomalies', 'collector'].includes(tabName);
+    const isSettingsTab = ['data-management', 'aliases', 'audit', 'anomalies', 'collector', 'users'].includes(tabName);
     const filterCard = document.querySelector('.filter-card');
     if (filterCard) {
         filterCard.style.display = isSettingsTab ? 'none' : 'block';
@@ -911,6 +1227,7 @@ function switchTab(tabName) {
     if (els.btnTabAliases) els.btnTabAliases.classList.remove('active');
     if (els.btnTabAudit) els.btnTabAudit.classList.remove('active');
     if (els.btnTabCollector) els.btnTabCollector.classList.remove('active');
+    if (els.btnTabUsers) els.btnTabUsers.classList.remove('active');
     
     els.viewExplorer.classList.remove('active');
     els.viewAnalytics.classList.remove('active');
@@ -919,6 +1236,7 @@ function switchTab(tabName) {
     if (els.viewAliasManager) els.viewAliasManager.classList.remove('active');
     if (els.viewAudit) els.viewAudit.classList.remove('active');
     if (els.viewCollectorSettings) els.viewCollectorSettings.classList.remove('active');
+    if (els.viewUserManagement) els.viewUserManagement.classList.remove('active');
     
     // Activate selected tab and view
     if (tabName === 'explorer') {
@@ -941,6 +1259,7 @@ function switchTab(tabName) {
         if (tabName === 'data-management') {
             activeBtn = els.btnTabManagement;
             activeView = els.viewDataManagement;
+            fetchRetentionSettings();
         } else if (tabName === 'aliases') {
             activeBtn = els.btnTabAliases;
             activeView = els.viewAliasManager;
@@ -954,6 +1273,11 @@ function switchTab(tabName) {
             activeBtn = els.btnTabCollector;
             activeView = els.viewCollectorSettings;
             fetchCollectorSettings();
+            fetchCollectorCidrs();
+        } else if (tabName === 'users') {
+            activeBtn = els.btnTabUsers;
+            activeView = els.viewUserManagement;
+            fetchUsersList();
         }
         
         if (activeBtn) activeBtn.classList.add('active');
@@ -969,22 +1293,26 @@ function switchTab(tabName) {
             }
         }
     }
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
 }
 
 // Update time summary subtitle
 function updateTimeRangeSubtitle() {
     const range = state.filters.timeRange;
-    let label = 'Overview of the last 24 hours of traffic';
-    if (range === '1h') label = 'Overview of the last 1 hour of traffic';
-    if (range === '7d') label = 'Overview of the last 7 days of traffic';
-    if (range === 'all') label = 'Overview of all recorded traffic';
+    let label = '過去 24 小時流量總覽';
+    if (range === '1h') label = '過去 1 小時流量總覽';
+    if (range === '7d') label = '過去 7 天流量總覽';
+    if (range === 'all') label = '所有歷史流量總覽';
     if (range === 'custom') {
         const startVal = document.getElementById('global-start-time').value;
         const endVal = document.getElementById('global-end-time').value;
         if (startVal && endVal) {
-            label = `Overview of traffic from ${startVal.replace('T', ' ')} to ${endVal.replace('T', ' ')}`;
+            label = `自 ${startVal.replace('T', ' ')} 至 ${endVal.replace('T', ' ')} 之流量總覽`;
         } else {
-            label = 'Overview of traffic for specific custom time window';
+            label = '自訂時間區間之流量總覽';
         }
     }
     els.timeRangeSummary.innerText = label;
@@ -995,23 +1323,107 @@ function applyFiltersFromForm() {
     state.filters.table = getSelectedTables();
     state.filters.exporter = getSelectedExporters();
     
-    const srcTypeEl = document.getElementById('filter-src-type');
-    if (srcTypeEl && srcTypeEl.value !== 'custom') {
-        state.filters.src = srcTypeEl.value;
-    } else {
-        state.filters.src = els.filterSrc.value.trim();
+    // Direction-aware IP filter
+    const ipDirEl = document.getElementById('filter-ip-dir');
+    const ipTypeEl = document.getElementById('filter-ip-type');
+    const ipValEl = document.getElementById('filter-ip-val');
+    const ipDir = ipDirEl ? ipDirEl.value : 'any';
+    let ipQuery = '';
+    if (ipTypeEl && ipTypeEl.value === 'custom') {
+        ipQuery = ipValEl ? ipValEl.value.trim() : '';
+    } else if (ipTypeEl) {
+        ipQuery = ipTypeEl.value;
     }
     
-    const dstTypeEl = document.getElementById('filter-dst-type');
-    if (dstTypeEl && dstTypeEl.value !== 'custom') {
-        state.filters.dst = dstTypeEl.value;
+    // Fallback to legacy src/dst inputs if direction elements not found
+    if (!ipDirEl) {
+        const srcTypeEl = document.getElementById('filter-src-type');
+        state.filters.src = (srcTypeEl && srcTypeEl.value !== 'custom') ? srcTypeEl.value : (els.filterSrc ? els.filterSrc.value.trim() : '');
+        const dstTypeEl = document.getElementById('filter-dst-type');
+        state.filters.dst = (dstTypeEl && dstTypeEl.value !== 'custom') ? dstTypeEl.value : (els.filterDst ? els.filterDst.value.trim() : '');
+        state.filters.ip = '';
     } else {
-        state.filters.dst = els.filterDst.value.trim();
+        state.filters.ip = '';
+        state.filters.src = '';
+        state.filters.dst = '';
+        if (ipDir === 'any') {
+            state.filters.ip = ipQuery;
+        } else if (ipDir === 'src') {
+            state.filters.src = ipQuery;
+        } else if (ipDir === 'dst') {
+            state.filters.dst = ipQuery;
+        }
     }
     
-    state.filters.sport = els.filterSport.value.trim();
-    state.filters.dport = els.filterDport.value.trim();
+    // Direction-aware Port filter
+    const portDirEl = document.getElementById('filter-port-dir');
+    const portValEl = document.getElementById('filter-port-val');
+    if (!portDirEl) {
+        state.filters.sport = els.filterSport ? els.filterSport.value.trim() : '';
+        state.filters.dport = els.filterDport ? els.filterDport.value.trim() : '';
+        state.filters.port = '';
+    } else {
+        const portDir = portDirEl.value;
+        const portVal = portValEl ? portValEl.value.trim() : '';
+        state.filters.port = '';
+        state.filters.sport = '';
+        state.filters.dport = '';
+        if (portDir === 'any') {
+            state.filters.port = portVal;
+        } else if (portDir === 'src') {
+            state.filters.sport = portVal;
+        } else if (portDir === 'dst') {
+            state.filters.dport = portVal;
+        }
+    }
+
     state.filters.proto = getSelectedProtocols();
+}
+
+// Read anomalies form elements into state anomalies filters
+function applyAnomaliesFiltersFromForm() {
+    const dirEl = document.getElementById('filter-anomalies-ip-dir');
+    const typeEl = document.getElementById('filter-anomalies-ip-type');
+    const valEl = document.getElementById('filter-anomalies-ip-val');
+    const ipDir = dirEl ? dirEl.value : 'any';
+    let ipVal = '';
+    if (typeEl && typeEl.value === 'custom') {
+        ipVal = valEl ? valEl.value.trim() : '';
+    } else if (typeEl) {
+        ipVal = typeEl.value;
+    }
+
+    state.anomaliesFilters.ip = '';
+    state.anomaliesFilters.src = '';
+    state.anomaliesFilters.dst = '';
+    if (ipDir === 'any') {
+        state.anomaliesFilters.ip = ipVal;
+    } else if (ipDir === 'src') {
+        state.anomaliesFilters.src = ipVal;
+    } else if (ipDir === 'dst') {
+        state.anomaliesFilters.dst = ipVal;
+    }
+
+    const portDirEl = document.getElementById('filter-anomalies-port-dir');
+    const portValEl = document.getElementById('filter-anomalies-port-val');
+    const portDir = portDirEl ? portDirEl.value : 'any';
+    const portVal = portValEl ? portValEl.value.trim() : '';
+    state.anomaliesFilters.port = '';
+    state.anomaliesFilters.sport = '';
+    state.anomaliesFilters.dport = '';
+    if (portDir === 'any') {
+        state.anomaliesFilters.port = portVal;
+    } else if (portDir === 'src') {
+        state.anomaliesFilters.sport = portVal;
+    } else if (portDir === 'dst') {
+        state.anomaliesFilters.dport = portVal;
+    }
+
+    const protoEl = document.getElementById('filter-anomalies-proto');
+    if (protoEl) state.anomaliesFilters.proto = protoEl.value.trim();
+
+    const flagEl = document.getElementById('filter-anomalies-flag');
+    if (flagEl) state.anomaliesFilters.flag = flagEl.value.trim();
 }
 
 // Helper: Format Bytes into human readable strings
@@ -1090,8 +1502,10 @@ async function fetchKPIs() {
         time_range: state.filters.timeRange
     });
     if (state.filters.exporter) params.append('exporter', state.filters.exporter);
+    if (state.filters.ip) params.append('ip', state.filters.ip);
     if (state.filters.src) params.append('src', state.filters.src);
     if (state.filters.dst) params.append('dst', state.filters.dst);
+    if (state.filters.port) params.append('port', state.filters.port);
     if (state.filters.sport) params.append('sport', state.filters.sport);
     if (state.filters.dport) params.append('dport', state.filters.dport);
     if (state.filters.proto) params.append('proto', state.filters.proto);
@@ -1124,8 +1538,10 @@ function getFlowQueryParams() {
     });
     
     if (state.filters.exporter) params.append('exporter', state.filters.exporter);
+    if (state.filters.ip) params.append('ip', state.filters.ip);
     if (state.filters.src) params.append('src', state.filters.src);
     if (state.filters.dst) params.append('dst', state.filters.dst);
+    if (state.filters.port) params.append('port', state.filters.port);
     if (state.filters.sport) params.append('sport', state.filters.sport);
     if (state.filters.dport) params.append('dport', state.filters.dport);
     if (state.filters.proto) params.append('proto', state.filters.proto);
@@ -1143,7 +1559,7 @@ async function fetchFlows() {
         <tr>
             <td colspan="${visibleColsCount}" class="text-center text-muted py-5">
                 <div class="spinner"></div>
-                Loading flow records...
+                正在載入流量記錄...
             </td>
         </tr>
     `;
@@ -1154,7 +1570,7 @@ async function fetchFlows() {
     
     try {
         const res = await fetch(`/api/flows?${params.toString()}`);
-        if (!res.ok) throw new Error('Failed to query flow records');
+        if (!res.ok) throw new Error('查詢流量記錄失敗');
         const data = await res.json();
         
         state.records = data.records;
@@ -1166,7 +1582,7 @@ async function fetchFlows() {
         els.flowsTbody.innerHTML = `
             <tr>
                 <td colspan="${visibleColsCount}" class="text-center text-muted py-5">
-                    <span style="color: var(--color-danger)">Error loading flows: ${err.message}</span>
+                    <span style="color: var(--color-danger)">載入流量記錄失敗: ${err.message}</span>
                 </td>
             </tr>
         `;
@@ -1183,7 +1599,7 @@ function renderFlowsTable() {
         els.flowsTbody.innerHTML = `
             <tr>
                 <td colspan="${visibleColsCount}" class="text-center text-muted py-5">
-                    No matching flows found. Ensure collectors are active and receiving traffic.
+                    查無符合條件之流量記錄。請確認流量收集器已啟動並正常接收流量。
                 </td>
             </tr>
         `;
@@ -1200,10 +1616,10 @@ function renderFlowsTable() {
         
         // Table values mapping
         const badgeType = r.type === 'ipfix' ? 'badge-info' : (r.type === 'netflow9' ? 'badge-primary' : 'badge-warning');
-        const typeLabel = r.type ? r.type.toUpperCase() : 'GROUPED';
+        const typeLabel = r.type ? r.type.toUpperCase() : '已聚合';
         
-        const timeFormatted = r.ts ? formatSqlTimestamp(r.ts) : 'Aggregated';
-        const protocolText = r.proto_name || 'Aggregated';
+        const timeFormatted = r.ts ? formatSqlTimestamp(r.ts) : '已聚合';
+        const protocolText = r.proto_name || '已聚合';
         
         tr.innerHTML = `
             <td class="col-type"><span class="badge ${badgeType}">${typeLabel}</span></td>
@@ -1308,14 +1724,10 @@ function renderPagination() {
     lucide.createIcons();
 }
 
-// Convert UTC DB Timestamp to local browser representation
+// Standard Taiwan time (Asia/Taipei UTC+8) formatter
 function formatSqlTimestamp(tsString) {
     if (!tsString) return '';
-    // Append Z to force browser to treat SQLite UTC string as UTC
-    const dateStr = tsString.includes('Z') ? tsString : tsString.replace(' ', 'T') + 'Z';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return tsString;
-    return d.toLocaleDateString() + ' ' + d.toTimeString().split(' ')[0];
+    return String(tsString).replace('T', ' ').replace('Z', '').substring(0, 19);
 }
 
 // Show modal dialog containing complete details of clicked row
@@ -1323,17 +1735,21 @@ function showFlowDetails(idx) {
     const r = state.records[idx];
     if (!r) return;
     
-    els.detailId.innerText = r.id || 'N/A (Grouped)';
-    els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : 'Aggregated';
-    els.detailType.innerText = r.type ? r.type.toUpperCase() : 'GROUPED';
+    if (els.detailRuleSection) {
+        els.detailRuleSection.style.display = 'none';
+    }
+    
+    els.detailId.innerText = r.id || '不適用 (聚合資料)';
+    els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : '已聚合';
+    els.detailType.innerText = r.type ? r.type.toUpperCase() : '已聚合';
     els.detailType.className = `value badge ${r.type === 'ipfix' ? 'badge-info' : (r.type === 'netflow9' ? 'badge-primary' : 'badge-warning')}`;
-    els.detailExporter.innerText = r.exporter || 'Aggregated';
-    els.detailSrc.innerText = r.src || 'Aggregated';
+    els.detailExporter.innerText = r.exporter || '已聚合';
+    els.detailSrc.innerText = r.src || '已聚合';
     els.detailSrcDomain.innerText = r.src_domain || 'N/A';
-    els.detailDst.innerText = r.dst || 'Aggregated';
+    els.detailDst.innerText = r.dst || '已聚合';
     els.detailDstDomain.innerText = r.dst_domain || 'N/A';
-    els.detailProto.innerText = r.proto_name || 'Aggregated';
-    els.detailOctets.innerText = `${formatNumber(r.octets)} bytes (${formatBytes(r.octets)})`;
+    els.detailProto.innerText = r.proto_name || '已聚合';
+    els.detailOctets.innerText = `${formatNumber(r.octets)} 位元組 (${formatBytes(r.octets)})`;
     els.detailPackets.innerText = formatNumber(r.packets);
     
     // Render raw json formatted
@@ -1362,8 +1778,10 @@ async function fetchStats() {
         time_range: state.filters.timeRange
     });
     if (state.filters.exporter) params.append('exporter', state.filters.exporter);
+    if (state.filters.ip) params.append('ip', state.filters.ip);
     if (state.filters.src) params.append('src', state.filters.src);
     if (state.filters.dst) params.append('dst', state.filters.dst);
+    if (state.filters.port) params.append('port', state.filters.port);
     if (state.filters.sport) params.append('sport', state.filters.sport);
     if (state.filters.dport) params.append('dport', state.filters.dport);
     if (state.filters.proto) params.append('proto', state.filters.proto);
@@ -1376,11 +1794,40 @@ async function fetchStats() {
         const data = await res.json();
         
         renderTimeChart(data.traffic_over_time);
-        renderBarChart('chart-top-sources', 'Top Sources', data.top_sources.map(x => formatChartIPLabel(x.src, x.domain)), data.top_sources.map(x => x.bytes));
-        renderBarChart('chart-top-destinations', 'Top Destinations', data.top_destinations.map(x => formatChartIPLabel(x.dst, x.domain)), data.top_destinations.map(x => x.bytes));
-        renderBarChart('chart-top-src-ports', 'Top 10 Source Ports', data.top_source_ports.map(x => x.sport.toString() + (x.port_name ? ` (${x.port_name})` : '')), data.top_source_ports.map(x => x.bytes));
-        renderBarChart('chart-top-dst-ports', 'Top 10 Destination Ports', data.top_destination_ports.map(x => x.dport.toString() + (x.port_name ? ` (${x.port_name})` : '')), data.top_destination_ports.map(x => x.bytes));
-        renderDoughnutChart('chart-protocols', data.protocols.map(x => x.name), data.protocols.map(x => x.count));
+        renderBarChart(
+            'chart-top-sources', 
+            'Top Sources', 
+            data.top_sources.map(x => formatChartIPLabel(x.src, x.domain)), 
+            data.top_sources.map(x => x.bytes),
+            { itemType: 'ip', defaultDir: 'src', viewType: 'general', rawItems: data.top_sources.map(x => x.src) }
+        );
+        renderBarChart(
+            'chart-top-destinations', 
+            'Top Destinations', 
+            data.top_destinations.map(x => formatChartIPLabel(x.dst, x.domain)), 
+            data.top_destinations.map(x => x.bytes),
+            { itemType: 'ip', defaultDir: 'dst', viewType: 'general', rawItems: data.top_destinations.map(x => x.dst) }
+        );
+        renderBarChart(
+            'chart-top-src-ports', 
+            'Top 10 Source Ports', 
+            data.top_source_ports.map(x => x.sport.toString() + (x.port_name ? ` (${x.port_name})` : '')), 
+            data.top_source_ports.map(x => x.bytes),
+            { itemType: 'port', defaultDir: 'src', viewType: 'general', rawItems: data.top_source_ports.map(x => x.sport) }
+        );
+        renderBarChart(
+            'chart-top-dst-ports', 
+            'Top 10 Destination Ports', 
+            data.top_destination_ports.map(x => x.dport.toString() + (x.port_name ? ` (${x.port_name})` : '')), 
+            data.top_destination_ports.map(x => x.bytes),
+            { itemType: 'port', defaultDir: 'dst', viewType: 'general', rawItems: data.top_destination_ports.map(x => x.dport) }
+        );
+        renderDoughnutChart(
+            'chart-protocols', 
+            data.protocols.map(x => x.name), 
+            data.protocols.map(x => x.count),
+            { itemType: 'proto', defaultDir: 'any', viewType: 'general', rawItems: data.protocols.map(x => x.name) }
+        );
         renderDoughnutChart('chart-exporters', data.top_exporters.map(x => x.exporter), data.top_exporters.map(x => x.flows));
         
     } catch (err) {
@@ -1413,7 +1860,7 @@ function renderTimeChart(timeData) {
             labels: labels,
             datasets: [
                 {
-                    label: 'Traffic Volume (Bytes)',
+                    label: '傳輸量 (Bytes)',
                     data: bytesData,
                     borderColor: '#6366f1',
                     backgroundColor: 'rgba(99, 102, 241, 0.1)',
@@ -1423,7 +1870,7 @@ function renderTimeChart(timeData) {
                     borderWidth: 2
                 },
                 {
-                    label: 'Packets',
+                    label: '封包數',
                     data: packetsData,
                     borderColor: '#10b981',
                     backgroundColor: 'transparent',
@@ -1495,32 +1942,54 @@ function renderTimeChart(timeData) {
     });
 }
 
-function renderBarChart(canvasId, title, labels, data) {
+function renderBarChart(canvasId, title, labels, data, drillMeta) {
     destroyChart(canvasId);
     
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    state.charts[canvasId] = new Chart(ctx, {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const ctx2d = ctx.getContext('2d');
+    
+    const ds = {
+        label: '傳輸量 (Bytes)',
+        data: data,
+        backgroundColor: 'rgba(99, 102, 241, 0.75)',
+        borderColor: '#6366f1',
+        borderWidth: 1,
+        borderRadius: 4
+    };
+    if (drillMeta) {
+        ds.drillMeta = drillMeta;
+    }
+
+    state.charts[canvasId] = new Chart(ctx2d, {
         type: 'bar',
         data: {
             labels: labels,
-            datasets: [{
-                label: 'Volume (Bytes)',
-                data: data,
-                backgroundColor: 'rgba(99, 102, 241, 0.75)',
-                borderColor: '#6366f1',
-                borderWidth: 1,
-                borderRadius: 4
-            }]
+            datasets: [ds]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            onClick: (event, elements, chart) => {
+                if (!elements || elements.length === 0) return;
+                const index = elements[0].index;
+                const meta = chart.data.datasets[0].drillMeta;
+                if (!meta) return;
+                const rawVal = (meta.rawItems && meta.rawItems[index] !== undefined) ? meta.rawItems[index] : chart.data.labels[index];
+                showChartContextMenu(event.native || event, meta.itemType, rawVal, meta.viewType, meta.defaultDir);
+            },
+            onHover: (event, chartElement) => {
+                const target = event.native ? event.native.target : (event.target || (event.chart && event.chart.canvas));
+                if (target) {
+                    target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+                }
+            },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            return 'Volume: ' + formatBytes(context.parsed.y);
+                            return '傳輸量: ' + formatBytes(context.parsed.y);
                         }
                     }
                 }
@@ -1544,33 +2013,55 @@ function renderBarChart(canvasId, title, labels, data) {
     });
 }
 
-function renderDoughnutChart(canvasId, labels, data) {
+function renderDoughnutChart(canvasId, labels, data, drillMeta) {
     destroyChart(canvasId);
     if (labels.length === 0) return; // avoid empty doughnut bug
     
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    state.charts[canvasId] = new Chart(ctx, {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const ctx2d = ctx.getContext('2d');
+
+    const ds = {
+        data: data,
+        backgroundColor: [
+            '#6366f1', // Indigo
+            '#10b981', // Emerald
+            '#0ea5e9', // Sky Blue
+            '#f59e0b', // Amber
+            '#ef4444', // Rose Red
+            '#8b5cf6', // Purple
+            '#ec4899', // Pink
+        ],
+        borderWidth: 1,
+        borderColor: '#111827'
+    };
+    if (drillMeta) {
+        ds.drillMeta = drillMeta;
+    }
+
+    state.charts[canvasId] = new Chart(ctx2d, {
         type: 'doughnut',
         data: {
             labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: [
-                    '#6366f1', // Indigo
-                    '#10b981', // Emerald
-                    '#0ea5e9', // Sky Blue
-                    '#f59e0b', // Amber
-                    '#ef4444', // Rose Red
-                    '#8b5cf6', // Purple
-                    '#ec4899', // Pink
-                ],
-                borderWidth: 1,
-                borderColor: '#111827'
-            }]
+            datasets: [ds]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            onClick: (event, elements, chart) => {
+                if (!elements || elements.length === 0) return;
+                const index = elements[0].index;
+                const meta = chart.data.datasets[0].drillMeta;
+                if (!meta) return;
+                const rawVal = (meta.rawItems && meta.rawItems[index] !== undefined) ? meta.rawItems[index] : chart.data.labels[index];
+                showChartContextMenu(event.native || event, meta.itemType, rawVal, meta.viewType, meta.defaultDir);
+            },
+            onHover: (event, chartElement) => {
+                const target = event.native ? event.native.target : (event.target || (event.chart && event.chart.canvas));
+                if (target) {
+                    target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+                }
+            },
             plugins: {
                 legend: {
                     position: 'right',
@@ -1794,9 +2285,9 @@ function updateDropdownLabels() {
     const labelProto = document.getElementById('label-proto');
     if (labelProto) {
         if (checkedProtos.length === 0) {
-            labelProto.innerText = 'None';
+            labelProto.innerText = '無';
         } else if (checkedProtos.length === protoCheckboxes.length) {
-            labelProto.innerText = 'All Protocols';
+            labelProto.innerText = '所有協定';
         } else {
             labelProto.innerText = checkedProtos.join(', ');
         }
@@ -1813,9 +2304,9 @@ function updateDropdownLabels() {
     const labelTable = document.getElementById('label-table');
     if (labelTable) {
         if (checkedTables.length === 0) {
-            labelTable.innerText = 'None';
+            labelTable.innerText = '無';
         } else if (checkedTables.length === tableCheckboxes.length) {
-            labelTable.innerText = 'All Data Sources';
+            labelTable.innerText = '所有資料來源';
         } else {
             labelTable.innerText = checkedTables.join(', ');
         }
@@ -1832,12 +2323,12 @@ function updateDropdownLabels() {
     const labelExporter = document.getElementById('label-exporter');
     if (labelExporter) {
         if (checkedExporters.length === 0) {
-            labelExporter.innerText = 'None';
+            labelExporter.innerText = '無';
         } else if (checkedExporters.length === exporterCheckboxes.length) {
-            labelExporter.innerText = 'All Exporters';
+            labelExporter.innerText = '所有 Exporter';
         } else {
             labelExporter.innerText = checkedExporters.length > 2 
-                ? `${checkedExporters.length} Exporters` 
+                ? `${checkedExporters.length} 個 Exporter` 
                 : checkedExporters.join(', ');
         }
     }
@@ -1853,11 +2344,11 @@ function updateDropdownLabels() {
     const labelCols = document.getElementById('label-columns');
     if (labelCols) {
         if (checkedCols.length === 0) {
-            labelCols.innerText = 'None';
+            labelCols.innerText = '無';
         } else if (checkedCols.length === colCheckboxes.length) {
-            labelCols.innerText = 'All Columns';
+            labelCols.innerText = '所有欄位';
         } else {
-            labelCols.innerText = `${checkedCols.length} Columns`;
+            labelCols.innerText = `${checkedCols.length} 個欄位`;
         }
     }
 }
@@ -1888,53 +2379,50 @@ function getSelectedExporters() {
     return checked.join(',');
 }
 
-// Convert local datetime-local string input value to UTC SQLite format YYYY-MM-DD HH:MM:SS
-function toUtcTimestamp(localStr) {
+// Convert local datetime-local string input value to Taiwan time format YYYY-MM-DD HH:MM:SS
+function toTaiwanLocalTimestamp(localStr) {
     if (!localStr) return '';
-    try {
-        const d = new Date(localStr);
-        if (isNaN(d.getTime())) return '';
-        return d.toISOString().replace('T', ' ').substring(0, 19);
-    } catch (e) {
-        return '';
-    }
+    let clean = localStr.replace('T', ' ').trim();
+    if (clean.length === 16) clean += ':00';
+    return clean;
 }
 
-// Execute Data Cleanup API POST Request
+// Execute Manual Data Cleanup API POST Request
 async function executeCleanup() {
     const beforeVal = els.cleanupBeforeDate.value;
     if (!beforeVal) {
-        showCleanupStatus('Please select a date and time.', 'error');
+        showCleanupStatus('請選擇日期與時間。', 'error');
         return;
     }
     
-    const utcDate = toUtcTimestamp(beforeVal);
-    if (!utcDate) {
-        showCleanupStatus('Invalid date selected.', 'error');
+    const localDate = toTaiwanLocalTimestamp(beforeVal);
+    if (!localDate) {
+        showCleanupStatus('所選日期格式無效。', 'error');
         return;
     }
     
-    if (!confirm(`Are you sure you want to delete all NetFlow data before ${utcDate} (UTC)? This action cannot be undone.`)) {
+    if (!confirm(`您確定要刪除所有在 ${localDate} (台灣時間) 之前的流量資料嗎？此操作將無法復原。`)) {
         return;
     }
     
-    showCleanupStatus('Executing cleanup...', 'info');
+    showCleanupStatus('正在執行資料清理...', 'info');
     els.btnExecuteCleanup.disabled = true;
     
     try {
-        const response = await fetch(`/api/flows/delete?before=${encodeURIComponent(utcDate)}`, {
+        const response = await fetch(`/api/flows/delete?before=${encodeURIComponent(localDate)}`, {
             method: 'POST'
         });
         
         const data = await response.json();
         if (response.ok) {
-            showCleanupStatus(data.message || 'Cleanup successfully initiated.', 'success');
+            showCleanupStatus(data.message || '資料清理已成功發起。', 'success');
             els.cleanupBeforeDate.value = ''; // Reset input
+            fetchRetentionSettings(); // Refresh retention card status
         } else {
-            showCleanupStatus(data.detail || 'Failed to initiate cleanup.', 'error');
+            showCleanupStatus(data.detail || '發起資料清理失敗。', 'error');
         }
     } catch (err) {
-        showCleanupStatus(`Network error: ${err.message}`, 'error');
+        showCleanupStatus(`網路錯誤: ${err.message}`, 'error');
     } finally {
         els.btnExecuteCleanup.disabled = false;
     }
@@ -1972,7 +2460,7 @@ async function fetchPortAliases() {
 
     tbody.innerHTML = `
         <tr>
-            <td colspan="3" class="text-center text-muted py-3">Loading aliases...</td>
+            <td colspan="3" class="text-center text-muted py-3">正在載入別名...</td>
         </tr>
     `;
 
@@ -2001,7 +2489,7 @@ function renderPortAliasesTable(list) {
     if (list.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="3" class="text-center text-muted py-3">No custom port aliases configured.</td>
+                <td colspan="3" class="text-center text-muted py-3">尚未設定任何自訂 Port 別名。</td>
             </tr>
         `;
         return;
@@ -2054,18 +2542,18 @@ function renderPortAliasesTable(list) {
             saveBtn.addEventListener('click', async () => {
                 const newName = editInput.value.trim();
                 if (!newName) {
-                    showPortAliasStatus('Alias name cannot be empty', 'error');
+                    showPortAliasStatus('別名名稱不得為空', 'error');
                     return;
                 }
                 
                 try {
                     const res = await fetch(`/api/ports/aliases?port=${item.port}&name=${encodeURIComponent(newName)}`, { method: 'POST' });
                     if (!res.ok) throw new Error('Save request failed');
-                    showPortAliasStatus('Port alias updated successfully', 'success');
+                    showPortAliasStatus('Port 別名已成功更新', 'success');
                     fetchPortAliases();
                     fetchFlows();
                 } catch (err) {
-                    showPortAliasStatus(`Error saving: ${err.message}`, 'error');
+                    showPortAliasStatus(`儲存失敗: ${err.message}`, 'error');
                 }
             });
             
@@ -2085,16 +2573,16 @@ function renderPortAliasesTable(list) {
         // Bind delete action
         btnDelete.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Are you sure you want to delete alias for port ${item.port}?`)) return;
+            if (!confirm(`您確定要刪除 Port ${item.port} 的別名嗎？`)) return;
             
             try {
                 const res = await fetch(`/api/ports/aliases/${item.port}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('Delete request failed');
-                showPortAliasStatus('Alias deleted successfully', 'success');
+                showPortAliasStatus('別名已成功刪除', 'success');
                 fetchPortAliases();
                 fetchFlows();
             } catch (err) {
-                showPortAliasStatus(`Error deleting: ${err.message}`, 'error');
+                showPortAliasStatus(`刪除失敗: ${err.message}`, 'error');
             }
         });
         
@@ -2117,7 +2605,7 @@ async function handleSavePortAlias(e) {
     const name = inputName.value.trim();
 
     if (!port || !name) {
-        showPortAliasStatus('Please fill in both port and name.', 'error');
+        showPortAliasStatus('請填寫 Port 埠號與別名名稱。', 'error');
         return;
     }
 
@@ -2127,14 +2615,14 @@ async function handleSavePortAlias(e) {
         });
         if (!res.ok) throw new Error('Failed to save port alias');
         
-        showPortAliasStatus(`Successfully mapped port ${port} as ${name}`, 'success');
+        showPortAliasStatus(`已成功將 Port ${port} 對應為 ${name}`, 'success');
         inputPort.value = '';
         inputName.value = '';
         fetchPortAliases();
         // Refresh flows table to reflect names update immediately
         fetchFlows();
     } catch (err) {
-        showPortAliasStatus(`Error saving: ${err.message}`, 'error');
+        showPortAliasStatus(`儲存失敗: ${err.message}`, 'error');
     }
 }
 
@@ -2176,7 +2664,7 @@ async function fetchIpAliases() {
 
     tbody.innerHTML = `
         <tr>
-            <td colspan="3" class="text-center text-muted py-3">Loading IP aliases...</td>
+            <td colspan="3" class="text-center text-muted py-3">正在載入 IP 別名...</td>
         </tr>
     `;
 
@@ -2235,7 +2723,7 @@ function renderIpAliasesTable(list) {
     if (list.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="3" class="text-center text-muted py-3">No custom IP aliases configured.</td>
+                <td colspan="3" class="text-center text-muted py-3">尚未設定任何自訂 IP 別名。</td>
             </tr>
         `;
         return;
@@ -2290,18 +2778,18 @@ function renderIpAliasesTable(list) {
             saveBtn.addEventListener('click', async () => {
                 const newName = editInput.value.trim();
                 if (!newName) {
-                    showIpAliasStatus('Alias label cannot be empty', 'error');
+                    showIpAliasStatus('別名名稱不得為空', 'error');
                     return;
                 }
                 
                 try {
                     const res = await fetch(`/api/ips/aliases?ip=${encodeURIComponent(item.ip)}&name=${encodeURIComponent(newName)}`, { method: 'POST' });
                     if (!res.ok) throw new Error('Save request failed');
-                    showIpAliasStatus('IP alias updated successfully', 'success');
+                    showIpAliasStatus('IP 別名已成功更新', 'success');
                     fetchIpAliases();
                     fetchFlows();
                 } catch (err) {
-                    showIpAliasStatus(`Error saving: ${err.message}`, 'error');
+                    showIpAliasStatus(`儲存失敗: ${err.message}`, 'error');
                 }
             });
             
@@ -2322,16 +2810,16 @@ function renderIpAliasesTable(list) {
         // Bind delete action
         btnDelete.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Are you sure you want to delete alias for IP ${item.ip}?`)) return;
+            if (!confirm(`您確定要刪除 IP ${item.ip} 的別名嗎？`)) return;
             
             try {
                 const res = await fetch(`/api/ips/aliases/${encodeURIComponent(item.ip)}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('Delete request failed');
-                showIpAliasStatus('IP alias deleted successfully', 'success');
+                showIpAliasStatus('IP 別名已成功刪除', 'success');
                 fetchIpAliases();
                 fetchFlows();
             } catch (err) {
-                showIpAliasStatus(`Error deleting: ${err.message}`, 'error');
+                showIpAliasStatus(`刪除失敗: ${err.message}`, 'error');
             }
         });
         
@@ -2354,7 +2842,7 @@ async function handleSaveIpAlias(e) {
     const name = inputName.value.trim();
 
     if (!ip || !name) {
-        showIpAliasStatus('Please fill in both IP and alias name.', 'error');
+        showIpAliasStatus('請填寫 IP 位址與別名名稱。', 'error');
         return;
     }
 
@@ -2364,14 +2852,14 @@ async function handleSaveIpAlias(e) {
         });
         if (!res.ok) throw new Error('Failed to save IP alias');
         
-        showIpAliasStatus(`Successfully mapped IP ${ip} as ${name}`, 'success');
+        showIpAliasStatus(`已成功將 IP ${ip} 對應為 ${name}`, 'success');
         inputIp.value = '';
         inputName.value = '';
         fetchIpAliases();
         // Refresh flows table to reflect names update immediately
         fetchFlows();
     } catch (err) {
-        showIpAliasStatus(`Error saving: ${err.message}`, 'error');
+        showIpAliasStatus(`儲存失敗: ${err.message}`, 'error');
     }
 }
 
@@ -2408,12 +2896,15 @@ function showIpAliasStatus(message, type) {
 
 // === Traffic Auditing Module ===
 
+let currentAuditRules = [];
+
 // Fetch all audit rules
 async function fetchAuditRules() {
     try {
         const response = await fetch('/api/audit/rules');
         if (!response.ok) throw new Error('Failed to fetch rules');
         const rules = await response.json();
+        currentAuditRules = rules;
         
         const tbody = els.auditRulesTbody;
         if (!tbody) return;
@@ -2439,7 +2930,8 @@ async function fetchAuditRules() {
             }
             const ipAliasSub = showAlias ? `<div class="domain-subtext" style="font-size: 0.75rem; color: var(--text-muted);">${showAlias}</div>` : '';
             const ipDisplay = rule.ip ? `<div>${ipText}</div>${ipAliasSub}` : '<span class="text-muted">(任意)</span>';
-            const portDisplay = rule.port || '<span class="text-muted">(任意)</span>';
+            const portAliasSub = rule.port_name ? `<div class="domain-subtext" style="font-size: 0.75rem; color: var(--text-muted);">${rule.port_name}</div>` : '';
+            const portDisplay = rule.port ? `<div>${rule.port}</div>${portAliasSub}` : '<span class="text-muted">(任意)</span>';
             const badgeClass = rule.flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
             const flagText = rule.flag === 'watch' ? '關注' : '異常';
             
@@ -2448,9 +2940,12 @@ async function fetchAuditRules() {
                     <td style="padding: 10px 12px; font-family: var(--font-mono);">${ipDisplay}</td>
                     <td style="padding: 10px 12px; font-family: var(--font-mono);">${portDisplay}</td>
                     <td style="padding: 10px 12px; text-align: center;">
-                        <span class="badge ${badgeClass}">${flagText}</span>
+                        <span class="badge ${badgeClass}" style="cursor: pointer;" title="點擊編輯規則" onclick="openEditAuditRuleModal(${rule.id})">${flagText}</span>
                     </td>
-                    <td style="padding: 10px 12px; text-align: right;">
+                    <td style="padding: 10px 12px; text-align: right; white-space: nowrap;">
+                        <button class="btn btn-secondary btn-sm" onclick="openEditAuditRuleModal(${rule.id})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; margin-right: 6px;">
+                            編輯
+                        </button>
                         <button class="btn btn-secondary btn-sm" onclick="deleteAuditRule(${rule.id})" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px;">
                             刪除
                         </button>
@@ -2458,12 +2953,146 @@ async function fetchAuditRules() {
                 </tr>
             `;
         }).join('');
+
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            lucide.createIcons();
+        }
     } catch (err) {
         console.error('Error fetching audit rules:', err);
     }
 }
 
-// Submit new rule
+// Open Edit Audit Rule Modal
+function openEditAuditRuleModal(ruleId) {
+    const rule = currentAuditRules.find(r => r.id === ruleId);
+    if (!rule) return;
+    
+    if (els.editRuleId) els.editRuleId.value = rule.id;
+    if (els.editRuleErrorMessage) {
+        els.editRuleErrorMessage.style.display = 'none';
+        els.editRuleErrorMessage.innerText = '';
+    }
+    
+    const rawIp = rule.ip || '';
+    if (els.editRuleSelectIpType && els.editRuleInputIp) {
+        if (!rawIp) {
+            els.editRuleSelectIpType.value = '';
+            els.editRuleInputIp.style.display = 'none';
+            els.editRuleInputIp.value = '';
+        } else if (rawIp.toLowerCase() === 'internal') {
+            els.editRuleSelectIpType.value = 'internal';
+            els.editRuleInputIp.style.display = 'none';
+            els.editRuleInputIp.value = '';
+        } else if (rawIp.toLowerCase() === 'external') {
+            els.editRuleSelectIpType.value = 'external';
+            els.editRuleInputIp.style.display = 'none';
+            els.editRuleInputIp.value = '';
+        } else {
+            els.editRuleSelectIpType.value = 'custom';
+            els.editRuleInputIp.style.display = 'block';
+            els.editRuleInputIp.value = rawIp;
+        }
+    }
+    
+    if (els.editRuleInputPort) {
+        els.editRuleInputPort.value = rule.port || '';
+    }
+    
+    const flagRadios = document.querySelectorAll('input[name="edit-rule-input-flag"]');
+    flagRadios.forEach(radio => {
+        radio.checked = (radio.value === rule.flag);
+    });
+    
+    if (els.modalEditAuditRule) {
+        els.modalEditAuditRule.classList.add('active');
+    }
+}
+
+// Close Edit Audit Rule Modal
+function closeEditRuleModal() {
+    if (els.modalEditAuditRule) {
+        els.modalEditAuditRule.classList.remove('active');
+    }
+    if (els.editRuleErrorMessage) {
+        els.editRuleErrorMessage.style.display = 'none';
+        els.editRuleErrorMessage.innerText = '';
+    }
+}
+
+// Show error in Edit Modal
+function showEditRuleError(msg) {
+    if (els.editRuleErrorMessage) {
+        els.editRuleErrorMessage.innerText = msg;
+        els.editRuleErrorMessage.style.display = 'block';
+    }
+}
+
+// Submit edited rule with duplicate check
+async function submitEditAuditRule(e) {
+    if (e) e.preventDefault();
+    if (!els.editRuleId) return;
+    const ruleId = parseInt(els.editRuleId.value, 10);
+    if (!ruleId) return;
+    
+    let ip = '';
+    if (els.editRuleSelectIpType) {
+        const type = els.editRuleSelectIpType.value;
+        if (type === 'custom') {
+            ip = els.editRuleInputIp ? els.editRuleInputIp.value.trim() : '';
+            if (!ip) {
+                showEditRuleError('請輸入自訂 IP 或 CIDR！');
+                return;
+            }
+        } else {
+            ip = type;
+        }
+    }
+    
+    const port = els.editRuleInputPort ? els.editRuleInputPort.value.trim() : '';
+    const flagEl = document.querySelector('input[name="edit-rule-input-flag"]:checked');
+    const flag = flagEl ? flagEl.value : 'watch';
+    
+    if (!ip && !port) {
+        showEditRuleError('IP 與 Port 不能同時為空！');
+        return;
+    }
+    
+    // Duplicate check against current rules (excluding self)
+    const normalizedNewIp = ip ? ip.toLowerCase() : '';
+    const normalizedNewPort = port || '';
+    const isDuplicate = currentAuditRules.some(r => {
+        if (r.id === ruleId) return false;
+        const existingIp = (r.ip || '').toLowerCase();
+        const existingPort = r.port || '';
+        return existingIp === normalizedNewIp && existingPort === normalizedNewPort;
+    });
+    
+    if (isDuplicate) {
+        showEditRuleError('已存在相同 IP/CIDR 與 Port 的比對規則，無法重複儲存！');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/audit/rules/${ruleId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ip || null, port: port || null, flag })
+        });
+        
+        const data = await response.json();
+        if (response.ok) {
+            closeEditRuleModal();
+            showAuditRuleStatus('規則已成功更新！', 'success');
+            fetchAuditRules();
+        } else {
+            showEditRuleError(data.detail || '更新失敗');
+        }
+    } catch (err) {
+        showEditRuleError(`連線錯誤: ${err.message}`);
+    }
+}
+
+// Submit new rule with duplicate check
 async function submitAuditRule() {
     const ipSelect = document.getElementById('audit-select-ip-type');
     let ip = '';
@@ -2484,6 +3113,20 @@ async function submitAuditRule() {
     
     if (!ip && !port) {
         showAuditRuleStatus('IP 與 Port 不能同時為空！', 'error');
+        return;
+    }
+    
+    // Duplicate check against current rules
+    const normalizedNewIp = ip ? ip.toLowerCase() : '';
+    const normalizedNewPort = port || '';
+    const isDuplicate = currentAuditRules.some(r => {
+        const existingIp = (r.ip || '').toLowerCase();
+        const existingPort = r.port || '';
+        return existingIp === normalizedNewIp && existingPort === normalizedNewPort;
+    });
+    
+    if (isDuplicate) {
+        showAuditRuleStatus('已存在相同 IP/CIDR 與 Port 的比對規則，無法重複新增！', 'error');
         return;
     }
     
@@ -2527,6 +3170,12 @@ async function deleteAuditRule(ruleId) {
         alert(`連線錯誤: ${err.message}`);
     }
 }
+
+// Make functions globally available
+window.openEditAuditRuleModal = openEditAuditRuleModal;
+window.closeEditRuleModal = closeEditRuleModal;
+window.submitEditAuditRule = submitEditAuditRule;
+window.deleteAuditRule = deleteAuditRule;
 
 // Fetch last audit status
 async function fetchAuditStatus() {
@@ -2627,7 +3276,7 @@ function renderAuditMatches(records) {
     if (records.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="13" class="text-center text-muted py-5">無任何比對符合的流量存檔資料</td>
+                <td colspan="11" class="text-center text-muted py-5">無任何比對符合的流量存檔資料</td>
             </tr>
         `;
         return;
@@ -2637,6 +3286,7 @@ function renderAuditMatches(records) {
         const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
         const flagText = r.match_flag === 'watch' ? '關注' : '異常';
         
+        const exporterSub = r.exporter_alias ? `<div class="domain-subtext" title="${r.exporter_alias}">${r.exporter_alias}</div>` : '';
         const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
         const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
         const sportAliasSub = r.sport_name ? `<div class="domain-subtext" title="${r.sport_name}">${r.sport_name}</div>` : '';
@@ -2644,16 +3294,14 @@ function renderAuditMatches(records) {
         
         return `
             <tr class="flow-row" onclick="showAuditFlowDetails(${idx})">
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-secondary);">${r.match_ts}</td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.ts}</td>
                 <td style="padding: 10px 12px; text-align: center;">
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
-                    <div>${r.rule_ip ? (r.rule_ip.toLowerCase() === 'internal' ? 'Private IP' : (r.rule_ip.toLowerCase() === 'external' ? 'Public IP' : r.rule_ip)) : '(任意)'}</div>
-                    ${r.rule_ip_alias && r.rule_ip.toLowerCase() !== 'internal' && r.rule_ip.toLowerCase() !== 'external' ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                <td style="padding: 10px 12px;">
+                    <div style="font-family: var(--font-mono);">${r.exporter || 'N/A'}</div>
+                    ${exporterSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">
                     <div>${r.src}</div>
                     ${srcDomainSub}
@@ -2772,17 +3420,41 @@ function showAuditFlowDetails(idx) {
     const r = state.auditRecords[idx];
     if (!r) return;
     
+    // Display Matched Rule Section
+    if (els.detailRuleSection) {
+        els.detailRuleSection.style.display = 'block';
+        
+        let ruleIpDisplay = '(任意)';
+        if (r.rule_ip) {
+            const lowerIp = r.rule_ip.toLowerCase();
+            ruleIpDisplay = lowerIp === 'internal' ? 'Private IP' : (lowerIp === 'external' ? 'Public IP' : r.rule_ip);
+            if (r.rule_ip_alias && lowerIp !== 'internal' && lowerIp !== 'external') {
+                ruleIpDisplay += ` (${r.rule_ip_alias})`;
+            }
+        }
+        els.detailRuleIp.innerText = ruleIpDisplay;
+        els.detailRulePort.innerText = r.rule_port || '(任意)';
+        
+        const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
+        const flagText = r.match_flag === 'watch' ? '關注 (Watch)' : '異常 (Anomaly)';
+        els.detailMatchFlag.className = `badge ${badgeClass}`;
+        els.detailMatchFlag.innerText = flagText;
+        
+        els.detailMatchTs.innerText = r.match_ts ? formatSqlTimestamp(r.match_ts) : 'N/A';
+    }
+    
     els.detailId.innerText = r.id || 'N/A';
     els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : 'N/A';
     els.detailType.innerText = r.proto ? r.proto.toUpperCase() : 'N/A';
     els.detailType.className = `value badge ${r.proto === 'ipfix' ? 'badge-info' : (r.proto === 'netflow9' ? 'badge-primary' : 'badge-warning')}`;
-    els.detailExporter.innerText = r.exporter || 'N/A';
+    const exporterAlias = r.exporter_alias ? ` (${r.exporter_alias})` : '';
+    els.detailExporter.innerText = `${r.exporter || 'N/A'}${exporterAlias}`;
     els.detailSrc.innerText = r.src || 'N/A';
     els.detailSrcDomain.innerText = r.src_domain || 'N/A';
     els.detailDst.innerText = r.dst || 'N/A';
     els.detailDstDomain.innerText = r.dst_domain || 'N/A';
     els.detailProto.innerText = r.proto_name || r.proto || 'N/A';
-    els.detailOctets.innerText = `${formatNumber(r.octets)} bytes (${formatBytes(r.octets)})`;
+    els.detailOctets.innerText = `${formatNumber(r.octets)} 位元組 (${formatBytes(r.octets)})`;
     els.detailPackets.innerText = formatNumber(r.packets);
     
     // Parse json_data
@@ -2791,7 +3463,7 @@ function showAuditFlowDetails(idx) {
         try {
             raw = JSON.parse(r.json_data);
         } catch (e) {
-            raw = { error: "Failed to parse json_data", raw: r.json_data };
+            raw = { error: "解析 json_data 失敗", raw: r.json_data };
         }
     }
     els.detailRawJson.innerText = JSON.stringify(raw, null, 2);
@@ -2804,9 +3476,13 @@ async function fetchAnomalousReport() {
     const offset = state.anomaliesPagination.offset;
     
     let url = `/api/audit/matches?limit=${limit}&offset=${offset}&sort_by=${state.auditSorting.by}&sort_order=${state.auditSorting.order}`;
+    if (state.anomaliesFilters.ip) url += `&ip=${encodeURIComponent(state.anomaliesFilters.ip)}`;
     if (state.anomaliesFilters.src) url += `&src=${encodeURIComponent(state.anomaliesFilters.src)}`;
     if (state.anomaliesFilters.dst) url += `&dst=${encodeURIComponent(state.anomaliesFilters.dst)}`;
     if (state.anomaliesFilters.port) url += `&port=${encodeURIComponent(state.anomaliesFilters.port)}`;
+    if (state.anomaliesFilters.sport) url += `&sport=${encodeURIComponent(state.anomaliesFilters.sport)}`;
+    if (state.anomaliesFilters.dport) url += `&dport=${encodeURIComponent(state.anomaliesFilters.dport)}`;
+    if (state.anomaliesFilters.proto) url += `&proto=${encodeURIComponent(state.anomaliesFilters.proto)}`;
     if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
     
     try {
@@ -2838,7 +3514,7 @@ function renderAnomalousReportTable(records) {
     if (records.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="12" class="text-center text-muted py-5">無任何異常流量報告資料</td>
+                <td colspan="10" class="text-center text-muted py-5">無任何異常流量報告資料</td>
             </tr>
         `;
         return;
@@ -2848,6 +3524,7 @@ function renderAnomalousReportTable(records) {
         const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
         const flagText = r.match_flag === 'watch' ? '關注' : '異常';
         
+        const exporterSub = r.exporter_alias ? `<div class="domain-subtext" title="${r.exporter_alias}">${r.exporter_alias}</div>` : '';
         const srcDomainSub = r.src_domain ? `<div class="domain-subtext">${r.src_domain}</div>` : '';
         const dstDomainSub = r.dst_domain ? `<div class="domain-subtext">${r.dst_domain}</div>` : '';
         const sportAliasSub = r.sport_name ? `<div class="domain-subtext" title="${r.sport_name}">${r.sport_name}</div>` : '';
@@ -2855,16 +3532,14 @@ function renderAnomalousReportTable(records) {
         
         return `
             <tr class="flow-row" onclick="showAnomaliesFlowDetails(${idx})">
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-secondary);">${r.match_ts}</td>
                 <td style="padding: 10px 12px; font-family: var(--font-mono);">${r.ts}</td>
                 <td style="padding: 10px 12px; text-align: center;">
                     <span class="badge ${badgeClass}">${flagText}</span>
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">
-                    <div>${r.rule_ip ? (r.rule_ip.toLowerCase() === 'internal' ? 'Private IP' : (r.rule_ip.toLowerCase() === 'external' ? 'Public IP' : r.rule_ip)) : '(任意)'}</div>
-                    ${r.rule_ip_alias && r.rule_ip.toLowerCase() !== 'internal' && r.rule_ip.toLowerCase() !== 'external' ? `<div class="domain-subtext" title="${r.rule_ip_alias}">${r.rule_ip_alias}</div>` : ''}
+                <td style="padding: 10px 12px;">
+                    <div style="font-family: var(--font-mono);">${r.exporter || 'N/A'}</div>
+                    ${exporterSub}
                 </td>
-                <td style="padding: 10px 12px; font-family: var(--font-mono); color: #818cf8;">${r.rule_port || '(任意)'}</td>
                 <td style="padding: 10px 12px;">
                     <div>${r.src}</div>
                     ${srcDomainSub}
@@ -2936,17 +3611,41 @@ function showAnomaliesFlowDetails(idx) {
     const r = state.anomaliesRecords[idx];
     if (!r) return;
     
+    // Display Matched Rule Section
+    if (els.detailRuleSection) {
+        els.detailRuleSection.style.display = 'block';
+        
+        let ruleIpDisplay = '(任意)';
+        if (r.rule_ip) {
+            const lowerIp = r.rule_ip.toLowerCase();
+            ruleIpDisplay = lowerIp === 'internal' ? 'Private IP' : (lowerIp === 'external' ? 'Public IP' : r.rule_ip);
+            if (r.rule_ip_alias && lowerIp !== 'internal' && lowerIp !== 'external') {
+                ruleIpDisplay += ` (${r.rule_ip_alias})`;
+            }
+        }
+        els.detailRuleIp.innerText = ruleIpDisplay;
+        els.detailRulePort.innerText = r.rule_port || '(任意)';
+        
+        const badgeClass = r.match_flag === 'watch' ? 'badge-watch' : 'badge-anomaly';
+        const flagText = r.match_flag === 'watch' ? '關注 (Watch)' : '異常 (Anomaly)';
+        els.detailMatchFlag.className = `badge ${badgeClass}`;
+        els.detailMatchFlag.innerText = flagText;
+        
+        els.detailMatchTs.innerText = r.match_ts ? formatSqlTimestamp(r.match_ts) : 'N/A';
+    }
+    
     els.detailId.innerText = r.id || 'N/A';
     els.detailTs.innerText = r.ts ? formatSqlTimestamp(r.ts) : 'N/A';
     els.detailType.innerText = r.proto ? r.proto.toUpperCase() : 'N/A';
     els.detailType.className = `value badge ${r.proto === 'ipfix' ? 'badge-info' : (r.proto === 'netflow9' ? 'badge-primary' : 'badge-warning')}`;
-    els.detailExporter.innerText = r.exporter || 'N/A';
+    const exporterAlias = r.exporter_alias ? ` (${r.exporter_alias})` : '';
+    els.detailExporter.innerText = `${r.exporter || 'N/A'}${exporterAlias}`;
     els.detailSrc.innerText = r.src || 'N/A';
     els.detailSrcDomain.innerText = r.src_domain || 'N/A';
     els.detailDst.innerText = r.dst || 'N/A';
     els.detailDstDomain.innerText = r.dst_domain || 'N/A';
     els.detailProto.innerText = r.proto_name || r.proto || 'N/A';
-    els.detailOctets.innerText = `${formatNumber(r.octets)} bytes (${formatBytes(r.octets)})`;
+    els.detailOctets.innerText = `${formatNumber(r.octets)} 位元組 (${formatBytes(r.octets)})`;
     els.detailPackets.innerText = formatNumber(r.packets);
     
     // Parse json_data
@@ -2955,7 +3654,7 @@ function showAnomaliesFlowDetails(idx) {
         try {
             raw = JSON.parse(r.json_data);
         } catch (e) {
-            raw = { error: "Failed to parse json_data", raw: r.json_data };
+            raw = { error: "解析 json_data 失敗", raw: r.json_data };
         }
     }
     els.detailRawJson.innerText = JSON.stringify(raw, null, 2);
@@ -3021,9 +3720,13 @@ function showAuditTriggerStatus(message, type) {
 // Fetch statistics for anomalous report view and render the two bar charts
 async function fetchAnomalousReportStats() {
     let url = `/api/audit/matches/stats?`;
+    if (state.anomaliesFilters.ip) url += `&ip=${encodeURIComponent(state.anomaliesFilters.ip)}`;
     if (state.anomaliesFilters.src) url += `&src=${encodeURIComponent(state.anomaliesFilters.src)}`;
     if (state.anomaliesFilters.dst) url += `&dst=${encodeURIComponent(state.anomaliesFilters.dst)}`;
     if (state.anomaliesFilters.port) url += `&port=${encodeURIComponent(state.anomaliesFilters.port)}`;
+    if (state.anomaliesFilters.sport) url += `&sport=${encodeURIComponent(state.anomaliesFilters.sport)}`;
+    if (state.anomaliesFilters.dport) url += `&dport=${encodeURIComponent(state.anomaliesFilters.dport)}`;
+    if (state.anomaliesFilters.proto) url += `&proto=${encodeURIComponent(state.anomaliesFilters.proto)}`;
     if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
 
     try {
@@ -3038,7 +3741,8 @@ async function fetchAnomalousReportStats() {
             data.top_sources.map(x => x.bytes),
             '來源流量 (Bytes)',
             'rgba(245, 158, 11, 0.7)',
-            'rgba(245, 158, 11, 1)'
+            'rgba(245, 158, 11, 1)',
+            { itemType: 'ip', defaultDir: 'src', viewType: 'anomalies', rawItems: data.top_sources.map(x => x.src) }
         );
 
         // Render Top Destinations chart
@@ -3048,7 +3752,8 @@ async function fetchAnomalousReportStats() {
             data.top_destinations.map(x => x.bytes),
             '目的流量 (Bytes)',
             'rgba(16, 185, 129, 0.7)',
-            'rgba(16, 185, 129, 1)'
+            'rgba(16, 185, 129, 1)',
+            { itemType: 'ip', defaultDir: 'dst', viewType: 'anomalies', rawItems: data.top_destinations.map(x => x.dst) }
         );
 
         // Render Top Ports chart
@@ -3058,7 +3763,8 @@ async function fetchAnomalousReportStats() {
             data.top_ports.map(x => x.bytes),
             '連接埠流量 (Bytes)',
             'rgba(99, 102, 241, 0.7)',
-            'rgba(99, 102, 241, 1)'
+            'rgba(99, 102, 241, 1)',
+            { itemType: 'port', defaultDir: 'any', viewType: 'anomalies', rawItems: data.top_ports.map(x => x.port) }
         );
 
         // Render Top Protocols chart
@@ -3068,7 +3774,8 @@ async function fetchAnomalousReportStats() {
             data.ip_protocols.map(x => x.bytes),
             '協定流量 (Bytes)',
             'rgba(236, 72, 153, 0.7)',
-            'rgba(236, 72, 153, 1)'
+            'rgba(236, 72, 153, 1)',
+            { itemType: 'proto', defaultDir: 'any', viewType: 'anomalies', rawItems: data.ip_protocols.map(x => x.name || x.protocol) }
         );
     } catch (err) {
         console.error('Error fetching anomalous report stats:', err);
@@ -3076,27 +3783,46 @@ async function fetchAnomalousReportStats() {
 }
 
 // Render Anomalous Bar Chart helper
-function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderColor) {
+function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderColor, drillMeta) {
     destroyChart(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
+
+    const ds = {
+        label: label,
+        data: data,
+        backgroundColor: bgColor,
+        borderColor: borderColor,
+        borderWidth: 1,
+        borderRadius: 4
+    };
+    if (drillMeta) {
+        ds.drillMeta = drillMeta;
+    }
 
     state.charts[canvasId] = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
-            datasets: [{
-                label: label,
-                data: data,
-                backgroundColor: bgColor,
-                borderColor: borderColor,
-                borderWidth: 1,
-                borderRadius: 4
-            }]
+            datasets: [ds]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            onClick: (event, elements, chart) => {
+                if (!elements || elements.length === 0) return;
+                const index = elements[0].index;
+                const meta = chart.data.datasets[0].drillMeta;
+                if (!meta) return;
+                const rawVal = (meta.rawItems && meta.rawItems[index] !== undefined) ? meta.rawItems[index] : chart.data.labels[index];
+                showChartContextMenu(event.native || event, meta.itemType, rawVal, meta.viewType, meta.defaultDir);
+            },
+            onHover: (event, chartElement) => {
+                const target = event.native ? event.native.target : (event.target || (event.chart && event.chart.canvas));
+                if (target) {
+                    target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+                }
+            },
             plugins: {
                 legend: {
                     display: false
@@ -3142,6 +3868,138 @@ function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderC
     });
 }
 
+// Chart Context Menu Handlers
+function showChartContextMenu(nativeEvent, itemType, rawVal, viewType, defaultDir) {
+    let menu = document.getElementById('chart-context-menu');
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'chart-context-menu';
+        menu.className = 'chart-context-menu';
+        document.body.appendChild(menu);
+    }
+
+    let html = '';
+    if (itemType === 'ip') {
+        html += `
+            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="any" data-val="${rawVal}">
+                <i data-lucide="search"></i> <span>過濾為任一端 IP (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="src" data-val="${rawVal}">
+                <i data-lucide="arrow-up-right"></i> <span>僅過濾為來源 IP (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="dst" data-val="${rawVal}">
+                <i data-lucide="arrow-down-left"></i> <span>僅過濾為目的 IP (${rawVal})</span>
+            </div>
+        `;
+    } else if (itemType === 'port') {
+        html += `
+            <div class="chart-context-menu-item" data-action="filter-port" data-dir="any" data-val="${rawVal}">
+                <i data-lucide="search"></i> <span>過濾為任一端 Port (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-port" data-dir="src" data-val="${rawVal}">
+                <i data-lucide="arrow-up-right"></i> <span>僅過濾為來源 Port (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-port" data-dir="dst" data-val="${rawVal}">
+                <i data-lucide="arrow-down-left"></i> <span>僅過濾為目的 Port (${rawVal})</span>
+            </div>
+        `;
+    } else if (itemType === 'proto') {
+        html += `
+            <div class="chart-context-menu-item" data-action="filter-proto" data-dir="any" data-val="${rawVal}">
+                <i data-lucide="activity"></i> <span>過濾此協定 (${rawVal})</span>
+            </div>
+        `;
+    }
+
+    menu.innerHTML = html;
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
+
+    menu.style.display = 'block';
+    const x = nativeEvent.clientX || 100;
+    const y = nativeEvent.clientY || 100;
+    const menuWidth = 250;
+    const menuHeight = menu.offsetHeight || 130;
+
+    const posX = (x + menuWidth > window.innerWidth) ? Math.max(10, x - menuWidth) : x;
+    const posY = (y + menuHeight > window.innerHeight) ? Math.max(10, y - menuHeight) : y;
+    menu.style.left = `${posX}px`;
+    menu.style.top = `${posY}px`;
+
+    menu.querySelectorAll('.chart-context-menu-item').forEach(item => {
+        item.onclick = (e) => {
+            e.stopPropagation();
+            const action = item.getAttribute('data-action');
+            const dir = item.getAttribute('data-dir');
+            const val = item.getAttribute('data-val');
+            hideChartContextMenu();
+            applyDrillDownFilter(viewType, action, dir, val);
+        };
+    });
+}
+
+function hideChartContextMenu() {
+    const menu = document.getElementById('chart-context-menu');
+    if (menu) menu.style.display = 'none';
+}
+
+function applyDrillDownFilter(viewType, action, dir, val) {
+    if (viewType === 'general') {
+        if (action === 'filter-ip') {
+            const dirEl = document.getElementById('filter-ip-dir');
+            const typeEl = document.getElementById('filter-ip-type');
+            const valEl = document.getElementById('filter-ip-val');
+            if (dirEl) dirEl.value = dir || 'any';
+            if (typeEl) typeEl.value = 'custom';
+            if (valEl) {
+                valEl.value = val;
+                valEl.style.display = 'block';
+            }
+        } else if (action === 'filter-port') {
+            const dirEl = document.getElementById('filter-port-dir');
+            const valEl = document.getElementById('filter-port-val');
+            if (dirEl) dirEl.value = dir || 'any';
+            if (valEl) valEl.value = val;
+        } else if (action === 'filter-proto') {
+            const checkboxes = document.querySelectorAll('#filter-proto-group input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = (cb.value.toUpperCase() === String(val).toUpperCase());
+            });
+            updateDropdownLabels();
+        }
+        applyFiltersFromForm();
+        state.pagination.offset = 0;
+        refreshData();
+        fetchFlows();
+        fetchStats();
+    } else if (viewType === 'anomalies') {
+        if (action === 'filter-ip') {
+            const dirEl = document.getElementById('filter-anomalies-ip-dir');
+            const typeEl = document.getElementById('filter-anomalies-ip-type');
+            const valEl = document.getElementById('filter-anomalies-ip-val');
+            if (dirEl) dirEl.value = dir || 'any';
+            if (typeEl) typeEl.value = 'custom';
+            if (valEl) {
+                valEl.value = val;
+                valEl.style.display = 'block';
+            }
+        } else if (action === 'filter-port') {
+            const dirEl = document.getElementById('filter-anomalies-port-dir');
+            const valEl = document.getElementById('filter-anomalies-port-val');
+            if (dirEl) dirEl.value = dir || 'any';
+            if (valEl) valEl.value = val;
+        } else if (action === 'filter-proto') {
+            const protoEl = document.getElementById('filter-anomalies-proto');
+            if (protoEl) protoEl.value = val;
+        }
+        applyAnomaliesFiltersFromForm();
+        state.anomaliesPagination.offset = 0;
+        fetchAnomalousReport();
+        fetchAnomalousReportStats();
+    }
+}
+
 // Fetch Collector Ports Settings
 async function fetchCollectorSettings() {
     try {
@@ -3185,7 +4043,7 @@ async function saveCollectorSettings() {
 
         const data = await res.json();
         if (!res.ok) {
-            throw new Error(data.detail || 'Save failed');
+            throw new Error(data.detail || '儲存失敗');
         }
 
         showCollectorSettingsStatus(`✅ 監聽埠設定已成功更新並完成同步！ (NetFlow v9: UDP ${data.netflow_port}, IPFIX: UDP ${data.ipfix_port})`, 'success');
@@ -3210,4 +4068,601 @@ function showCollectorSettingsStatus(message, type) {
         el.style.color = '#f87171';
         el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
     }
+}
+
+// ---------------- Authentication Logic ----------------
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (res.ok && data.authenticated && data.user) {
+            state.currentUser = data.user;
+            renderCurrentUser(data.user);
+            if (els.viewLogin) els.viewLogin.style.display = 'none';
+            
+            // Check mandatory password change on first login
+            if (data.user.must_change_password) {
+                if (els.modalMustChangePassword) {
+                    els.modalMustChangePassword.classList.add('active');
+                }
+            }
+            return true;
+        } else {
+            showLoginScreen();
+            return false;
+        }
+    } catch (err) {
+        showLoginScreen();
+        return false;
+    }
+}
+
+function showLoginScreen() {
+    state.currentUser = null;
+    if (els.viewLogin) {
+        els.viewLogin.style.display = 'flex';
+        if (els.loginUsername) els.loginUsername.focus();
+    }
+}
+
+function renderCurrentUser(user) {
+    if (els.currentUsername) els.currentUsername.innerText = user.username || 'admin';
+    if (els.currentUserRole) els.currentUserRole.innerText = user.role === 'admin' ? '系統管理員' : '一般使用者';
+    if (els.userAvatarInitial) els.userAvatarInitial.innerText = (user.username || 'A')[0].toUpperCase();
+    
+    // Control admin-only elements visibility
+    if (els.btnTabUsers) {
+        els.btnTabUsers.style.display = user.role === 'admin' ? 'flex' : 'none';
+    }
+}
+
+async function handleLogin() {
+    const username = els.loginUsername.value.trim();
+    const password = els.loginPassword.value;
+    if (!username || !password) {
+        showLoginError('請輸入帳號與密碼');
+        return;
+    }
+
+    els.loginErrorMessage.style.display = 'none';
+    els.btnDoLogin.disabled = true;
+
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || '登入失敗');
+        }
+
+        state.currentUser = data.user;
+        renderCurrentUser(data.user);
+        els.loginPassword.value = '';
+        els.viewLogin.style.display = 'none';
+
+        if (data.user.must_change_password && els.modalMustChangePassword) {
+            els.modalMustChangePassword.classList.add('active');
+        } else {
+            // Proceed to app
+            fetchExporterDropdown();
+            fetchPortAliases();
+            fetchIpAliases();
+            switchTab('anomalies');
+        }
+    } catch (err) {
+        showLoginError(err.message);
+    } finally {
+        els.btnDoLogin.disabled = false;
+    }
+}
+
+function showLoginError(msg) {
+    if (els.loginErrorMessage) {
+        els.loginErrorMessage.innerText = msg;
+        els.loginErrorMessage.style.display = 'block';
+    }
+}
+
+async function handleLogout() {
+    if (!confirm('您確定要登出系統嗎？')) return;
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {}
+    showLoginScreen();
+}
+
+function openChangePwdModal() {
+    if (els.modalChangePassword) {
+        els.formChangeOwnPassword.reset();
+        if (els.changePwdError) els.changePwdError.style.display = 'none';
+        els.modalChangePassword.classList.add('active');
+    }
+}
+
+function closeChangePwdModal() {
+    if (els.modalChangePassword) els.modalChangePassword.classList.remove('active');
+}
+
+async function submitChangeOwnPassword() {
+    const old_password = els.inputCurrentPwd.value;
+    const new_password = els.inputNewOwnPwd.value;
+    const confirm_pwd = els.inputNewOwnPwdConfirm.value;
+
+    if (new_password !== confirm_pwd) {
+        showChangePwdError('兩次輸入的新密碼不一致！');
+        return;
+    }
+    if (new_password.length < 6) {
+        showChangePwdError('新密碼長度至少需為 6 個字元！');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password, new_password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '修改失敗');
+        
+        alert('密碼修改成功！');
+        closeChangePwdModal();
+    } catch (err) {
+        showChangePwdError(err.message);
+    }
+}
+
+function showChangePwdError(msg) {
+    if (els.changePwdError) {
+        els.changePwdError.innerText = msg;
+        els.changePwdError.style.display = 'block';
+    }
+}
+
+async function submitForceChangePassword() {
+    const old_password = els.inputForceOldPwd.value;
+    const new_password = els.inputForceNewPwd.value;
+    const confirm_pwd = els.inputForceNewPwdConfirm.value;
+
+    if (new_password !== confirm_pwd) {
+        showForcePwdError('兩次輸入的新密碼不一致！');
+        return;
+    }
+    if (new_password.length < 6) {
+        showForcePwdError('新密碼長度至少需為 6 個字元！');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password, new_password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '更新失敗');
+        
+        alert('密碼已成功設定！歡迎使用 NetFlow Collector 系統。');
+        if (els.modalMustChangePassword) {
+            els.modalMustChangePassword.classList.remove('active');
+        }
+        fetchExporterDropdown();
+        fetchPortAliases();
+        fetchIpAliases();
+        switchTab('anomalies');
+    } catch (err) {
+        showForcePwdError(err.message);
+    }
+}
+
+function showForcePwdError(msg) {
+    if (els.forcePwdError) {
+        els.forcePwdError.innerText = msg;
+        els.forcePwdError.style.display = 'block';
+    }
+}
+
+// ---------------- Retention Settings & Schedule Logic ----------------
+async function fetchRetentionSettings() {
+    try {
+        const res = await fetch('/api/settings/retention');
+        if (!res.ok) throw new Error('讀取保留設定失敗');
+        const data = await res.json();
+        
+        if (els.inputRetentionDays) els.inputRetentionDays.value = data.retention_days;
+        if (els.inputRetentionTime) els.inputRetentionTime.value = data.schedule_time;
+        if (els.selectRetentionEnabled) els.selectRetentionEnabled.value = data.enabled ? '1' : '0';
+        if (els.retentionLastRunTime) els.retentionLastRunTime.innerText = data.last_run || '尚未執行';
+        if (els.retentionNextRunTime) els.retentionNextRunTime.innerText = data.next_run || '-';
+        if (els.retentionLastMessage) els.retentionLastMessage.innerText = data.last_message || '-';
+        
+        if (els.retentionStatusBadge) {
+            if (data.enabled) {
+                els.retentionStatusBadge.className = 'badge badge-success';
+                els.retentionStatusBadge.innerText = '排程監控中';
+            } else {
+                els.retentionStatusBadge.className = 'badge badge-secondary';
+                els.retentionStatusBadge.innerText = '排程已停用';
+            }
+        }
+    } catch (err) {
+        showRetentionAlert(`無法載入資料保留政策設定: ${err.message}`, 'error');
+    }
+}
+
+async function saveRetentionSettings() {
+    const retention_days = parseInt(els.inputRetentionDays.value, 10);
+    const schedule_time = els.inputRetentionTime.value;
+    const enabled = els.selectRetentionEnabled.value === '1';
+
+    if (isNaN(retention_days) || retention_days < 1) {
+        showRetentionAlert('保留天數必須大於 0 天', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/settings/retention', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ retention_days, schedule_time, enabled })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '儲存失敗');
+        
+        showRetentionAlert(data.message || '資料保留政策更新成功！', 'success');
+        fetchRetentionSettings();
+    } catch (err) {
+        showRetentionAlert(err.message, 'error');
+    }
+}
+
+async function runRetentionNow() {
+    if (!confirm(`確定要立即觸發定時排程清理作業嗎？系統將立即清除超過保留天數的 Flow 歷史資料。`)) {
+        return;
+    }
+
+    showRetentionAlert('正在執行排程清理作業...', 'info');
+    try {
+        const res = await fetch('/api/flows/cleanup/execute-retention', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '執行失敗');
+
+        showRetentionAlert(data.message || '排程清理已成功完成！', 'success');
+        fetchRetentionSettings();
+    } catch (err) {
+        showRetentionAlert(`執行失敗: ${err.message}`, 'error');
+    }
+}
+
+function showRetentionAlert(msg, type) {
+    const el = els.retentionStatusAlert;
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerText = msg;
+    if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+        el.style.color = '#60a5fa';
+        el.style.border = '1px solid rgba(59, 130, 246, 0.3)';
+    }
+}
+
+// ---------------- Collector Allowed CIDRs Logic ----------------
+async function fetchCollectorCidrs() {
+    const tbody = els.collectorCidrsTbody;
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/settings/collector/cidrs');
+        if (!res.ok) throw new Error('無法讀取白名單');
+        const list = await res.json();
+
+        if (list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center text-muted" style="padding: 24px 0;">
+                        目前未設定白名單（系統預設接收來自所有來源 Exporter 的流量封包）。
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = '';
+        list.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+            tr.innerHTML = `
+                <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 600; color: #818cf8;">${item.cidr}</td>
+                <td style="padding: 10px 14px; color: var(--text-secondary);">${item.description || '-'}</td>
+                <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">${item.created_at || '-'}</td>
+                <td style="padding: 10px 14px; text-align: center;">
+                    <button class="btn-del-cidr" data-id="${item.id}" data-cidr="${item.cidr}" style="background: none; border: none; color: var(--color-danger); cursor: pointer; padding: 4px 8px; border-radius: 4px;">
+                        <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+                    </button>
+                </td>
+            `;
+            const btnDel = tr.querySelector('.btn-del-cidr');
+            btnDel.addEventListener('click', () => deleteCollectorCidr(item.id, item.cidr));
+            tbody.appendChild(tr);
+        });
+
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            lucide.createIcons();
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger" style="padding: 20px 0;">讀取白名單失敗: ${err.message}</td></tr>`;
+    }
+}
+
+async function addCollectorCidr() {
+    const cidr = els.inputNewCollectorCidr.value.trim();
+    const description = els.inputNewCollectorCidrDesc.value.trim();
+    if (!cidr) return;
+
+    try {
+        const res = await fetch('/api/settings/collector/cidrs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr, description })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '新增失敗');
+
+        showCollectorCidrStatus(data.message, 'success');
+        els.inputNewCollectorCidr.value = '';
+        els.inputNewCollectorCidrDesc.value = '';
+        fetchCollectorCidrs();
+    } catch (err) {
+        showCollectorCidrStatus(err.message, 'error');
+    }
+}
+
+async function deleteCollectorCidr(id, cidr) {
+    if (!confirm(`確定要將 '${cidr}' 從收集器允許接收白名單中移除嗎？`)) return;
+    try {
+        const res = await fetch(`/api/settings/collector/cidrs/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '刪除失敗');
+
+        showCollectorCidrStatus(`已移除白名單網段 '${cidr}'`, 'success');
+        fetchCollectorCidrs();
+    } catch (err) {
+        showCollectorCidrStatus(err.message, 'error');
+    }
+}
+
+function showCollectorCidrStatus(msg, type) {
+    const el = els.collectorCidrsStatus;
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerText = msg;
+    if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+// ---------------- User Management Logic (Admin) ----------------
+async function fetchUsersList() {
+    const tbody = els.usersTbody;
+    if (!tbody) return;
+
+    try {
+        const res = await fetch('/api/users');
+        if (!res.ok) {
+            if (res.status === 403) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding: 30px 0;">權限不足，僅系統管理員可檢視與管理帳號清單。</td></tr>`;
+                return;
+            }
+            throw new Error('讀取使用者清單失敗');
+        }
+        const users = await res.json();
+        tbody.innerHTML = '';
+
+        users.forEach(u => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+            
+            const roleBadge = u.role === 'admin' 
+                ? `<span class="badge badge-primary">系統管理員</span>` 
+                : `<span class="badge badge-secondary">一般使用者</span>`;
+                
+            const statusBadge = u.is_active 
+                ? `<span class="badge badge-success">正常啟用</span>` 
+                : `<span class="badge badge-warning" style="color: #f87171;">已停用</span>`;
+                
+            const pwdBadge = u.must_change_password 
+                ? `<span class="badge badge-warning">首次登入須修改</span>` 
+                : `<span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-muted);">已設定</span>`;
+
+            tr.innerHTML = `
+                <td style="padding: 12px 14px; font-weight: 600; color: var(--text-primary);">${u.username}</td>
+                <td style="padding: 12px 14px;">${roleBadge}</td>
+                <td style="padding: 12px 14px;">${statusBadge}</td>
+                <td style="padding: 12px 14px;">${pwdBadge}</td>
+                <td style="padding: 12px 14px; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">${u.last_login || '從未登入'}</td>
+                <td style="padding: 12px 14px; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);">${u.created_at || '-'}</td>
+                <td style="padding: 12px 14px; text-align: center;">
+                    <div style="display: inline-flex; align-items: center; gap: 6px;">
+                        <button class="btn-toggle-active" data-id="${u.id}" data-active="${u.is_active}" data-uname="${u.username}" title="${u.is_active ? '停用帳號' : '啟用帳號'}" style="background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; color: ${u.is_active ? '#fbbf24' : '#34d399'};">
+                            <i data-lucide="${u.is_active ? 'pause-circle' : 'play-circle'}" style="width: 16px; height: 16px;"></i>
+                        </button>
+                        <button class="btn-reset-user-pwd" data-id="${u.id}" data-uname="${u.username}" title="重設密碼" style="background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; color: #818cf8;">
+                            <i data-lucide="key" style="width: 16px; height: 16px;"></i>
+                        </button>
+                        <button class="btn-del-user" data-id="${u.id}" data-uname="${u.username}" title="刪除帳號" style="background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; color: #f87171;" ${u.username === 'admin' ? 'disabled style="opacity: 0.3; cursor: not-allowed;"' : ''}>
+                            <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+
+            const btnToggle = tr.querySelector('.btn-toggle-active');
+            btnToggle.addEventListener('click', () => toggleUserActive(u.id, u.is_active, u.username));
+
+            const btnReset = tr.querySelector('.btn-reset-user-pwd');
+            btnReset.addEventListener('click', () => openResetPasswordModal(u.id, u.username));
+
+            const btnDel = tr.querySelector('.btn-del-user');
+            if (u.username !== 'admin') {
+                btnDel.addEventListener('click', () => deleteUser(u.id, u.username));
+            }
+
+            tbody.appendChild(tr);
+        });
+
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            lucide.createIcons();
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger" style="padding: 20px 0;">載入使用者失敗: ${err.message}</td></tr>`;
+    }
+}
+
+function openAddUserModal() {
+    if (els.modalAddUser) {
+        els.formAddUser.reset();
+        if (els.addUserError) els.addUserError.style.display = 'none';
+        els.modalAddUser.classList.add('active');
+        if (els.inputNewUserName) els.inputNewUserName.focus();
+    }
+}
+
+function closeAddUserModal() {
+    if (els.modalAddUser) els.modalAddUser.classList.remove('active');
+}
+
+async function submitCreateUser() {
+    const username = els.inputNewUserName.value.trim();
+    const password = els.inputNewUserPassword.value;
+    const role = els.selectNewUserRole.value;
+
+    try {
+        const res = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, role })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '建立使用者失敗');
+
+        closeAddUserModal();
+        showUserStatusMessage(data.message || `使用者 '${username}' 建立成功`, 'success');
+        fetchUsersList();
+    } catch (err) {
+        if (els.addUserError) {
+            els.addUserError.innerText = err.message;
+            els.addUserError.style.display = 'block';
+        }
+    }
+}
+
+async function toggleUserActive(userId, currentActive, username) {
+    const targetState = !currentActive;
+    const actionText = targetState ? '啟用' : '停用';
+    if (!confirm(`確定要${actionText}使用者 '${username}' 嗎？`)) return;
+
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: targetState })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '更新狀態失敗');
+
+        showUserStatusMessage(`已成功${actionText}使用者 '${username}'`, 'success');
+        fetchUsersList();
+    } catch (err) {
+        showUserStatusMessage(err.message, 'error');
+    }
+}
+
+function openResetPasswordModal(userId, username) {
+    if (els.modalResetUserPassword) {
+        els.resetTargetUserId.value = userId;
+        els.resetTargetUsername.innerText = username;
+        els.formResetUserPassword.reset();
+        if (els.resetPwdError) els.resetPwdError.style.display = 'none';
+        els.modalResetUserPassword.classList.add('active');
+        if (els.inputAdminNewPwd) els.inputAdminNewPwd.focus();
+    }
+}
+
+function closeResetPwdModal() {
+    if (els.modalResetUserPassword) els.modalResetUserPassword.classList.remove('active');
+}
+
+async function submitResetUserPassword() {
+    const userId = els.resetTargetUserId.value;
+    const new_password = els.inputAdminNewPwd.value;
+
+    try {
+        const res = await fetch(`/api/users/${userId}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '重設密碼失敗');
+
+        closeResetPwdModal();
+        showUserStatusMessage(data.message || '密碼已成功重設', 'success');
+        fetchUsersList();
+    } catch (err) {
+        if (els.resetPwdError) {
+            els.resetPwdError.innerText = err.message;
+            els.resetPwdError.style.display = 'block';
+        }
+    }
+}
+
+async function deleteUser(userId, username) {
+    if (!confirm(`確定要刪除使用者 '${username}' 嗎？此操作將無法復原。`)) return;
+
+    try {
+        const res = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '刪除失敗');
+
+        showUserStatusMessage(data.message || `已成功刪除使用者 '${username}'`, 'success');
+        fetchUsersList();
+    } catch (err) {
+        showUserStatusMessage(err.message, 'error');
+    }
+}
+
+function showUserStatusMessage(msg, type) {
+    const el = els.usersStatusMessage;
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerText = msg;
+    if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
