@@ -1,23 +1,82 @@
-# Python cache
+# ==========================================
+# Antigravity & Agent Environment Tools
+# ==========================================
+antigravity_env_tools/
+
+# ==========================================
+# Python Bytecode & Cache
+# ==========================================
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.pyd
 
-# Environments
+# ==========================================
+# Virtual Environments
+# ==========================================
 env/
 venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
 
-# Databases
-*.db
+# ==========================================
+# Distribution / Packaging / Builds
+# ==========================================
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+develop-eggs/
+eggs/
+parts/
+
+# ==========================================
+# Testing & Code Coverage
+# ==========================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# ==========================================
+# Logs & Databases
+# ==========================================
+*.log
 *.sqlite
+*.sqlite3
+*.db
 
-# IDEs and OS files
+# ==========================================
+# IDEs, Editors & OS Files
+# ==========================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+desktop.ini
+ehthumbs.db
 
-# Large files
+# ==========================================
+# Project Specific & Large Files
+# ==========================================
 ipinfo_lite.csv
