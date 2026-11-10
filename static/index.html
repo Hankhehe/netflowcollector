@@ -284,7 +284,6 @@
                                 <!-- Rendered dynamically by JS -->
                             </div>
                         </div>
-                        </div>
                     </form>
                 </div>
             </div>
@@ -510,38 +509,37 @@
                         </div>
                     </div>
                     
-                    <!-- Search & Filter Controls -->
-                    <div style="padding: 14px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;">
-                        <div class="form-group" style="min-width: 140px; margin-bottom: 0;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px;">標記旗標</label>
-                            <select id="filter-anomalies-flag" class="form-control select-dark" style="height: 36px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">所有標記</option>
-                                <option value="watch">關注 (Watch)</option>
-                                <option value="anomaly">異常 (Anomaly)</option>
-                            </select>
-                        </div>
-                        <div style="display: flex; gap: 8px; margin-left: auto;">
-                            <button type="button" id="btn-reset-anomalies-search" class="btn btn-secondary btn-sm-action">重設</button>
-                            <button type="button" id="btn-apply-anomalies-search" class="btn btn-primary btn-sm-action">套用篩選</button>
-                        </div>
-                    </div>
-
-                    <!-- Dynamic Condition Builder for Anomalies -->
-                    <div class="dynamic-conditions-panel" id="anomalies-conditions-panel" style="padding: 12px 24px; background: rgba(0, 0, 0, 0.05); border-bottom: 1px solid var(--border-color); margin-top: 0;">
-                        <div class="conditions-panel-header">
-                            <div class="conditions-title-group">
-                                <i data-lucide="filter" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
-                                <span class="conditions-panel-title">條件式過濾 (支援來源/目的 IP、Port、協定自由組合)</span>
+                    <!-- Unified Search & Dynamic Condition Builder for Anomalies -->
+                    <div class="dynamic-conditions-panel" id="anomalies-conditions-panel" style="padding: 14px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); margin-top: 0; border-top: none;">
+                        <div class="conditions-panel-header" style="margin-bottom: 10px;">
+                            <div class="conditions-title-group" style="flex-wrap: wrap; gap: 14px;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label for="filter-anomalies-flag" style="font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap; margin: 0;">標記旗標:</label>
+                                    <select id="filter-anomalies-flag" class="form-control select-dark" style="width: 140px; height: 32px; background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; color: var(--text-primary); font-size: 0.82rem;">
+                                        <option value="">所有標記</option>
+                                        <option value="watch">關注 (Watch)</option>
+                                        <option value="anomaly">異常 (Anomaly)</option>
+                                    </select>
+                                </div>
+                                <div style="width: 1px; height: 20px; background: var(--border-color);"></div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <i data-lucide="filter" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
+                                    <span class="conditions-panel-title">條件式過濾</span>
+                                </div>
                                 <div class="logic-toggle-group">
                                     <span class="logic-label">條件關係:</span>
                                     <button type="button" class="btn-logic active" data-view="anomalies" data-logic="AND">AND (且)</button>
                                     <button type="button" class="btn-logic" data-view="anomalies" data-logic="OR">OR (或)</button>
                                 </div>
+                                <button type="button" class="btn-outline-primary" id="btn-add-anomalies-condition">
+                                    <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+                                    <span>新增條件</span>
+                                </button>
                             </div>
-                            <button type="button" class="btn-outline-primary" id="btn-add-anomalies-condition">
-                                <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-                                <span>新增條件</span>
-                            </button>
+                            <div style="display: flex; gap: 8px; align-items: center; margin-left: auto;">
+                                <button type="button" id="btn-reset-anomalies-search" class="btn btn-secondary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">重設</button>
+                                <button type="button" id="btn-apply-anomalies-search" class="btn btn-primary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">套用篩選</button>
+                            </div>
                         </div>
                         <div class="conditions-list" id="anomalies-conditions-list">
                             <!-- Rendered dynamically by JS -->
