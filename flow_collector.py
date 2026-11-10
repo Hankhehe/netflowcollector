@@ -215,21 +215,70 @@ NFV9_FIELDS = {
     61: ("direction", 1),
 }
 
+def get_db_collector_ports(default_nf=2055, default_ipfix=4739):
+    db_path = os.getenv("SQLITE_DB_PATH", "/data/flows.db")
+    if not os.path.exists(db_path):
+        db_path = "flows.db"
+    if not os.path.exists(db_path):
+        return default_nf, default_ipfix
+    
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT key, value FROM system_settings WHERE key IN ('netflow_port', 'ipfix_port')")
+        rows = dict(cur.fetchall())
+        conn.close()
+        nf_port = int(rows.get("netflow_port", default_nf))
+        ipfix_port = int(rows.get("ipfix_port", default_ipfix))
+        return nf_port, ipfix_port
+    except Exception:
+        return default_nf, default_ipfix
+
 class NetFlowV9Collector:
     def __init__(self, host: str, port: int, q: queue.Queue):
-        self.addr = (host, port)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(self.addr)
-        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int]]]] = {}
+        self.host = host
+        self.port = port
         self.q = q
+        self.sock = None
+        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int]]]] = {}
+        self.bind_socket()
+
+    def bind_socket(self):
+        if self.sock:
+            try: self.sock.close()
+            except: pass
+            self.sock = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.settimeout(2.0)
+            s.bind((self.host, self.port))
+            self.sock = s
+            print(f"[NetFlowV9Collector] Successfully listening on UDP {self.host}:{self.port}", file=sys.stderr)
+        except Exception as e:
+            print(f"[NetFlowV9Collector] Error binding UDP {self.host}:{self.port}: {e}", file=sys.stderr)
+
+    def update_port(self, new_port: int):
+        if self.port != new_port:
+            print(f"[NetFlowV9Collector] Updating listening port: {self.port} -> {new_port}", file=sys.stderr)
+            self.port = new_port
+            self.bind_socket()
 
     def run(self):
         while True:
+            if not self.sock:
+                self.bind_socket()
+                if not self.sock:
+                    time.sleep(2)
+                    continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
                 self.handle_packet(ip, data)
+            except socket.timeout:
+                continue
             except Exception as e:
-                print(f"[NetFlowV9Collector] Error handling packet: {e}", file=sys.stderr)
+                print(f"[NetFlowV9Collector] Socket error: {e}", file=sys.stderr)
                 time.sleep(1)
 
     def handle_packet(self, exporter_ip: str, buf: bytes):
@@ -327,19 +376,48 @@ IPFIX_IE = {
 
 class IPFIXCollector:
     def __init__(self, host: str, port: int, q: queue.Queue):
-        self.addr = (host, port)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(self.addr)
-        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int,int]]]] = {}
+        self.host = host
+        self.port = port
         self.q = q
+        self.sock = None
+        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int,int]]]] = {}
+        self.bind_socket()
+
+    def bind_socket(self):
+        if self.sock:
+            try: self.sock.close()
+            except: pass
+            self.sock = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.settimeout(2.0)
+            s.bind((self.host, self.port))
+            self.sock = s
+            print(f"[IPFIXCollector] Successfully listening on UDP {self.host}:{self.port}", file=sys.stderr)
+        except Exception as e:
+            print(f"[IPFIXCollector] Error binding UDP {self.host}:{self.port}: {e}", file=sys.stderr)
+
+    def update_port(self, new_port: int):
+        if self.port != new_port:
+            print(f"[IPFIXCollector] Updating listening port: {self.port} -> {new_port}", file=sys.stderr)
+            self.port = new_port
+            self.bind_socket()
 
     def run(self):
         while True:
+            if not self.sock:
+                self.bind_socket()
+                if not self.sock:
+                    time.sleep(2)
+                    continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
                 self.handle_packet(ip, data)
+            except socket.timeout:
+                continue
             except Exception as e:
-                print(f"[IPFIXCollector] Error handling packet: {e}", file=sys.stderr)
+                print(f"[IPFIXCollector] Socket error: {e}", file=sys.stderr)
                 time.sleep(1)
 
     def handle_packet(self, exporter_ip: str, buf: bytes):
@@ -421,30 +499,51 @@ class IPFIXCollector:
                     }
                     self.q.put(("ipfix", norm))
 
+def monitor_ports(nf_collector, ipfix_collector):
+    while True:
+        try:
+            time.sleep(3)
+            db_nf, db_ipfix = get_db_collector_ports(nf_collector.port, ipfix_collector.port)
+            if db_nf != nf_collector.port:
+                nf_collector.update_port(db_nf)
+            if db_ipfix != ipfix_collector.port:
+                ipfix_collector.update_port(db_ipfix)
+        except Exception:
+            time.sleep(3)
+
 # ---------------- Runner ----------------
 def main():
     ap = argparse.ArgumentParser(description="NetFlow v9 + IPFIX -> ClickHouse")
     ap.add_argument("--bind", default="0.0.0.0")
-    ap.add_argument("--nf-port", type=int, default=2055)
-    ap.add_argument("--ipfix-port", type=int, default=4739)
+    ap.add_argument("--nf-port", type=int, default=None)
+    ap.add_argument("--ipfix-port", type=int, default=None)
     args = ap.parse_args()
+
+    db_nf, db_ipfix = get_db_collector_ports(2055, 4739)
+    env_nf = int(os.getenv("NETFLOW_PORT", db_nf))
+    env_ipfix = int(os.getenv("IPFIX_PORT", db_ipfix))
+
+    nf_port = args.nf_port if args.nf_port is not None else env_nf
+    ipfix_port = args.ipfix_port if args.ipfix_port is not None else env_ipfix
 
     q = queue.Queue()
 
-    nf = NetFlowV9Collector(args.bind, args.nf_port, q)
-    ipf = IPFIXCollector(args.bind, args.ipfix_port, q)
+    nf = NetFlowV9Collector(args.bind, nf_port, q)
+    ipf = IPFIXCollector(args.bind, ipfix_port, q)
     writer = ClickHouseWriter(q)
 
     t1 = threading.Thread(target=nf.run, daemon=True)
     t2 = threading.Thread(target=ipf.run, daemon=True)
     t3 = threading.Thread(target=writer.run, daemon=True)
+    t4 = threading.Thread(target=monitor_ports, args=(nf, ipf), daemon=True)
     
     t1.start()
     t2.start()
     t3.start()
+    t4.start()
 
-    print(f"NetFlow v9 on {args.bind}:{args.nf_port}", file=sys.stderr)
-    print(f"IPFIX on {args.bind}:{args.ipfix_port}", file=sys.stderr)
+    print(f"NetFlow v9 listening on {args.bind}:{nf.port}", file=sys.stderr)
+    print(f"IPFIX listening on {args.bind}:{ipf.port}", file=sys.stderr)
     try:
         while True:
             time.sleep(1)

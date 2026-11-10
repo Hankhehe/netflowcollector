@@ -73,6 +73,12 @@ const els = {
     viewDataManagement: document.getElementById('view-data-management'),
     viewAliasManager: document.getElementById('view-alias-manager'),
     viewAudit: document.getElementById('view-audit'),
+    btnTabCollector: document.getElementById('btn-tab-collector'),
+    viewCollectorSettings: document.getElementById('view-collector-settings'),
+    formCollectorSettings: document.getElementById('form-collector-settings'),
+    inputSettingNetflowPort: document.getElementById('input-setting-netflow-port'),
+    inputSettingIpfixPort: document.getElementById('input-setting-ipfix-port'),
+    collectorSettingsStatus: document.getElementById('collector-settings-status'),
     cleanupBeforeDate: document.getElementById('cleanup-before-date'),
     btnExecuteCleanup: document.getElementById('btn-execute-cleanup'),
     cleanupStatusMessage: document.getElementById('cleanup-status-message'),
@@ -299,6 +305,20 @@ function setupEventListeners() {
         els.btnTabAudit.addEventListener('click', (e) => {
             e.preventDefault();
             switchTab('audit');
+        });
+    }
+
+    if (els.btnTabCollector) {
+        els.btnTabCollector.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab('collector');
+        });
+    }
+
+    if (els.formCollectorSettings) {
+        els.formCollectorSettings.addEventListener('submit', (e) => {
+            e.preventDefault();
+            saveCollectorSettings();
         });
     }
 
@@ -633,6 +653,7 @@ function setupEventListeners() {
             icon.classList.add('spin-animation');
             setTimeout(() => icon.classList.remove('spin-animation'), 1000);
         }
+        fetchExporterDropdown();
         refreshData();
     });
     
@@ -856,7 +877,7 @@ function switchTab(tabName) {
     state.activeTab = tabName;
     
     // Hide filter card if settings/report tabs are active
-    const isSettingsTab = ['data-management', 'aliases', 'audit', 'anomalies'].includes(tabName);
+    const isSettingsTab = ['data-management', 'aliases', 'audit', 'anomalies', 'collector'].includes(tabName);
     const filterCard = document.querySelector('.filter-card');
     if (filterCard) {
         filterCard.style.display = isSettingsTab ? 'none' : 'block';
@@ -889,6 +910,7 @@ function switchTab(tabName) {
     if (els.btnTabManagement) els.btnTabManagement.classList.remove('active');
     if (els.btnTabAliases) els.btnTabAliases.classList.remove('active');
     if (els.btnTabAudit) els.btnTabAudit.classList.remove('active');
+    if (els.btnTabCollector) els.btnTabCollector.classList.remove('active');
     
     els.viewExplorer.classList.remove('active');
     els.viewAnalytics.classList.remove('active');
@@ -896,6 +918,7 @@ function switchTab(tabName) {
     if (els.viewDataManagement) els.viewDataManagement.classList.remove('active');
     if (els.viewAliasManager) els.viewAliasManager.classList.remove('active');
     if (els.viewAudit) els.viewAudit.classList.remove('active');
+    if (els.viewCollectorSettings) els.viewCollectorSettings.classList.remove('active');
     
     // Activate selected tab and view
     if (tabName === 'explorer') {
@@ -927,6 +950,10 @@ function switchTab(tabName) {
             fetchAuditRules();
             fetchAuditStatus();
             fetchAuditMatches();
+        } else if (tabName === 'collector') {
+            activeBtn = els.btnTabCollector;
+            activeView = els.viewCollectorSettings;
+            fetchCollectorSettings();
         }
         
         if (activeBtn) activeBtn.classList.add('active');
@@ -1003,7 +1030,7 @@ function formatNumber(num) {
 }
 
 // Fetch Exporters to populate filter dropdown
-async function fetchExporterDropdown() {
+async function fetchExporterDropdown(skipRefresh = false) {
     try {
         const res = await fetch('/api/exporters');
         if (!res.ok) throw new Error('Failed to fetch exporters list');
@@ -1011,11 +1038,22 @@ async function fetchExporterDropdown() {
         
         const container = document.getElementById('filter-exporter-group');
         if (container) {
+            const prevCheckboxes = container.querySelectorAll('input[type="checkbox"]');
+            const prevChecked = new Set();
+            let allWereChecked = true;
+            if (prevCheckboxes.length > 0) {
+                prevCheckboxes.forEach(cb => {
+                    if (cb.checked) prevChecked.add(cb.value);
+                    else allWereChecked = false;
+                });
+            }
+
             container.innerHTML = '';
             exporters.forEach(ip => {
                 const label = document.createElement('label');
                 label.className = 'checkbox-label';
-                label.innerHTML = `<input type="checkbox" name="exporter" value="${ip}" checked> ${ip}`;
+                const isChecked = allWereChecked || prevChecked.has(ip);
+                label.innerHTML = `<input type="checkbox" name="exporter" value="${ip}" ${isChecked ? 'checked' : ''}> ${ip}`;
                 container.appendChild(label);
             });
             
@@ -1025,8 +1063,9 @@ async function fetchExporterDropdown() {
             });
             updateDropdownLabels();
             
-            // Apply exporter filters and fetch current stats
-            refreshData();
+            if (!skipRefresh) {
+                refreshData();
+            }
         }
     } catch (err) {
         console.error('Error fetching exporters dropdown:', err);
@@ -1842,6 +1881,10 @@ function getSelectedExporters() {
             checked.push(cb.value);
         }
     });
+    // If all or none are checked, treat as All Exporters (no filter restriction)
+    if (checked.length === checkboxes.length || checked.length === 0) {
+        return '';
+    }
     return checked.join(',');
 }
 
@@ -3097,4 +3140,74 @@ function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderC
             }
         }
     });
+}
+
+// Fetch Collector Ports Settings
+async function fetchCollectorSettings() {
+    try {
+        const res = await fetch('/api/settings/collector');
+        if (!res.ok) throw new Error('Failed to fetch collector settings');
+        const data = await res.json();
+        if (els.inputSettingNetflowPort) els.inputSettingNetflowPort.value = data.netflow_port || 2055;
+        if (els.inputSettingIpfixPort) els.inputSettingIpfixPort.value = data.ipfix_port || 4739;
+    } catch (err) {
+        showCollectorSettingsStatus(`載入設定失敗: ${err.message}`, 'error');
+    }
+}
+
+// Save Collector Ports Settings
+async function saveCollectorSettings() {
+    const nfPort = parseInt(els.inputSettingNetflowPort.value);
+    const ipfixPort = parseInt(els.inputSettingIpfixPort.value);
+
+    if (isNaN(nfPort) || nfPort < 1 || nfPort > 65535) {
+        showCollectorSettingsStatus('NetFlow Port 必須為 1 至 65535 之間的有效數字', 'error');
+        return;
+    }
+    if (isNaN(ipfixPort) || ipfixPort < 1 || ipfixPort > 65535) {
+        showCollectorSettingsStatus('IPFIX Port 必須為 1 至 65535 之間的有效數字', 'error');
+        return;
+    }
+    if (nfPort === ipfixPort) {
+        showCollectorSettingsStatus('NetFlow Port 與 IPFIX Port 不可設定為相同 Port 號', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/settings/collector', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                netflow_port: nfPort,
+                ipfix_port: ipfixPort
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'Save failed');
+        }
+
+        showCollectorSettingsStatus(`✅ 監聽埠設定已成功更新並完成同步！ (NetFlow v9: UDP ${data.netflow_port}, IPFIX: UDP ${data.ipfix_port})`, 'success');
+    } catch (err) {
+        showCollectorSettingsStatus(`儲存設定失敗: ${err.message}`, 'error');
+    }
+}
+
+// Show status message for Collector Settings
+function showCollectorSettingsStatus(message, type) {
+    const el = els.collectorSettingsStatus;
+    if (!el) return;
+
+    el.style.display = 'block';
+    el.innerText = message;
+    if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
 }

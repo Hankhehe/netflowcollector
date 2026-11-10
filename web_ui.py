@@ -8,11 +8,11 @@ import ipaddress
 import time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, List, Dict, Any, Iterable
+from typing import Optional, List, Dict, Any, Iterable, Tuple
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 app = FastAPI(title="Netflow Collector Web UI")
 
@@ -213,6 +213,16 @@ def load_ip_aliases():
     except Exception as e:
         print(f"[Startup Init] Error loading IP aliases into cache: {e}")
 
+def build_ip_where_clause(col: str, ip_query: str, params: dict, param_key: str) -> str:
+    val = ip_query.strip().lower()
+    if val == "internal":
+        return f"(isIPv4String({col}) OR isIPv6String({col})) AND (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+    elif val == "external":
+        return f"(isIPv4String({col}) OR isIPv6String({col})) AND NOT (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+    else:
+        params[param_key] = f"{ip_query}%"
+        return f"{col} LIKE %({param_key})s"
+
 def resolve_ip_alias(ip_str: str) -> Optional[str]:
     if not ip_str:
         return None
@@ -226,16 +236,6 @@ def resolve_ip_alias(ip_str: str) -> Optional[str]:
     # 1. Exact match first
     if ip_str in ip_aliases_cache:
         return ip_aliases_cache[ip_str]
-
-def build_ip_where_clause(col: str, ip_query: str, params: dict, param_key: str) -> str:
-    val = ip_query.strip().lower()
-    if val == "internal":
-        return f"(isIPv4String({col}) OR isIPv6String({col})) AND (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
-    elif val == "external":
-        return f"(isIPv4String({col}) OR isIPv6String({col})) AND NOT (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
-    else:
-        params[param_key] = f"{ip_query}%"
-        return f"{col} LIKE %({param_key})s"
         
     # 2. CIDR range match from SQLite
     try:
@@ -387,10 +387,19 @@ def init_db():
             records_matched INTEGER DEFAULT 0,
             message TEXT
         )""")
+
+        # Initialize system settings table
+        cur.execute("""CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""")
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('netflow_port', '2055')")
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('ipfix_port', '4739')")
         
         conn.commit()
         conn.close()
-        print("[Startup Init] SQLite DNS cache, port, IP aliases, and audit tables initialized successfully.")
+        print("[Startup Init] SQLite DNS cache, port, IP aliases, audit, and system settings tables initialized successfully.")
         
         load_port_aliases()
         load_ip_aliases()
@@ -398,8 +407,42 @@ def init_db():
         print(f"[Startup Init] Error initializing SQLite tables: {e}")
 
     # Initialize ClickHouse tables if they do not exist
+    init_clickhouse_tables()
+
+def ensure_matched_flows_table(client=None):
+    """Ensure the matched_flows table exists in ClickHouse."""
     try:
-        client = get_ch_client()
+        if client is None:
+            client = get_ch_client()
+        client.command("""
+        CREATE TABLE IF NOT EXISTS matched_flows (
+            id String,
+            exporter String,
+            proto String,
+            src String,
+            dst String,
+            sport UInt16,
+            dport UInt16,
+            packets UInt64,
+            octets UInt64,
+            protocol Nullable(UInt16),
+            json_data String,
+            ts DateTime,
+            rule_ip Nullable(String),
+            rule_port Nullable(String),
+            match_flag String,
+            match_ts DateTime DEFAULT now()
+        ) ENGINE = MergeTree()
+        ORDER BY (match_ts, ts, exporter, src, dst)
+        """)
+    except Exception as e:
+        print(f"[Ensure Matched Flows Table] Warning: {e}")
+
+def init_clickhouse_tables(client=None):
+    """Initialize ClickHouse tables if they do not exist."""
+    try:
+        if client is None:
+            client = get_ch_client()
         client.command("""
         CREATE TABLE IF NOT EXISTS ipfix (
             id String,
@@ -439,27 +482,7 @@ def init_db():
         """)
         
         # Initialize matched_flows table (without TTL)
-        client.command("""
-        CREATE TABLE IF NOT EXISTS matched_flows (
-            id String,
-            exporter String,
-            proto String,
-            src String,
-            dst String,
-            sport UInt16,
-            dport UInt16,
-            packets UInt64,
-            octets UInt64,
-            protocol Nullable(UInt16),
-            json_data String,
-            ts DateTime,
-            rule_ip Nullable(String),
-            rule_port Nullable(String),
-            match_flag String,
-            match_ts DateTime DEFAULT now()
-        ) ENGINE = MergeTree()
-        ORDER BY (match_ts, ts, exporter, src, dst)
-        """)
+        ensure_matched_flows_table(client)
         
         # Ensure TTL is applied to existing tables if they were created without it
         try:
@@ -471,6 +494,28 @@ def init_db():
         print("[Startup Init] ClickHouse database tables initialized successfully.")
     except Exception as e:
         print(f"[Startup Init] Error initializing ClickHouse tables: {e}")
+
+def get_system_setting(key: str, default_val: str) -> str:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = ?", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else default_val
+    except Exception:
+        return default_val
+
+def set_system_setting(key: str, value: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO system_settings (key, value, updated_at) 
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+    """, (key, value))
+    conn.commit()
+    conn.close()
 
 @app.on_event("startup")
 def on_startup():
@@ -496,6 +541,39 @@ def get_exporters():
     except Exception as e:
         reset_ch_client()
         raise HTTPException(status_code=500, detail=str(e))
+class CollectorSettingsRequest(BaseModel):
+    netflow_port: int = Field(..., ge=1, le=65535, description="NetFlow v9 UDP listening port")
+    ipfix_port: int = Field(..., ge=1, le=65535, description="IPFIX UDP listening port")
+
+@app.get("/api/settings/collector")
+def get_collector_settings():
+    try:
+        nf_port = int(get_system_setting("netflow_port", "2055"))
+        ipfix_port = int(get_system_setting("ipfix_port", "4739"))
+        return {
+            "netflow_port": nf_port,
+            "ipfix_port": ipfix_port
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load collector settings: {e}")
+
+@app.post("/api/settings/collector")
+def update_collector_settings(payload: CollectorSettingsRequest):
+    if payload.netflow_port == payload.ipfix_port:
+        raise HTTPException(status_code=400, detail="NetFlow port and IPFIX port cannot be the same port.")
+    
+    try:
+        set_system_setting("netflow_port", str(payload.netflow_port))
+        set_system_setting("ipfix_port", str(payload.ipfix_port))
+        
+        return {
+            "status": "success",
+            "message": f"Collector listening ports updated successfully: NetFlow v9 (UDP {payload.netflow_port}), IPFIX (UDP {payload.ipfix_port}).",
+            "netflow_port": payload.netflow_port,
+            "ipfix_port": payload.ipfix_port
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update collector settings: {e}")
 
 @app.get("/api/flows")
 def get_flows(
@@ -1772,6 +1850,145 @@ def check_flow_match(flow: Dict[str, Any], parsed_rules: List[Dict[str, Any]]) -
             
     return None
 
+def build_rule_sql_condition(rule: Dict[str, Any], idx: int, params: Dict[str, Any]) -> str:
+    """
+    Build a ClickHouse SQL boolean condition for a single audit rule.
+    Supports:
+      - IP: internal, external, CIDR (e.g. 192.168.1.0/24), single IP (e.g. 10.0.0.1)
+      - Port: single port (e.g. 80), port range (e.g. 80-443)
+    Rule matches if: (IP match) AND (Port match)
+    """
+    sub_conds = []
+    
+    # 1. IP condition
+    ip_raw = rule.get("ip")
+    if ip_raw:
+        ip_str = str(ip_raw).strip()
+        ip_lower = ip_str.lower()
+        if ip_lower == "internal":
+            internal_nets = "isIPAddressInRange(src, '10.0.0.0/8') OR isIPAddressInRange(src, '172.16.0.0/12') OR isIPAddressInRange(src, '192.168.0.0/16')"
+            internal_netd = "isIPAddressInRange(dst, '10.0.0.0/8') OR isIPAddressInRange(dst, '172.16.0.0/12') OR isIPAddressInRange(dst, '192.168.0.0/16')"
+            ip_cond = f"((isIPv4String(src) AND ({internal_nets})) OR (isIPv4String(dst) AND ({internal_netd})))"
+            sub_conds.append(ip_cond)
+        elif ip_lower == "external":
+            ext_nets = "NOT (isIPAddressInRange(src, '10.0.0.0/8') OR isIPAddressInRange(src, '172.16.0.0/12') OR isIPAddressInRange(src, '192.168.0.0/16'))"
+            ext_netd = "NOT (isIPAddressInRange(dst, '10.0.0.0/8') OR isIPAddressInRange(dst, '172.16.0.0/12') OR isIPAddressInRange(dst, '192.168.0.0/16'))"
+            ip_cond = f"((isIPv4String(src) AND ({ext_nets})) OR (isIPv4String(dst) AND ({ext_netd})))"
+            sub_conds.append(ip_cond)
+        elif "/" in ip_str:
+            p_name = f"rule_{idx}_cidr"
+            params[p_name] = ip_str
+            ip_cond = f"(((isIPv4String(src) OR isIPv6String(src)) AND isIPAddressInRange(src, %({p_name})s)) OR ((isIPv4String(dst) OR isIPv6String(dst)) AND isIPAddressInRange(dst, %({p_name})s)))"
+            sub_conds.append(ip_cond)
+        else:
+            p_name = f"rule_{idx}_ip"
+            params[p_name] = ip_str
+            ip_cond = f"(src = %({p_name})s OR dst = %({p_name})s)"
+            sub_conds.append(ip_cond)
+
+    # 2. Port condition
+    port_raw = rule.get("port")
+    if port_raw is not None and str(port_raw).strip() != "":
+        port_str = str(port_raw).strip()
+        if "-" in port_str:
+            parts = port_str.split("-")
+            p_start_name = f"rule_{idx}_pstart"
+            p_end_name = f"rule_{idx}_pend"
+            params[p_start_name] = int(parts[0].strip())
+            params[p_end_name] = int(parts[1].strip())
+            port_cond = f"((sport >= %({p_start_name})s AND sport <= %({p_end_name})s) OR (dport >= %({p_start_name})s AND dport <= %({p_end_name})s))"
+            sub_conds.append(port_cond)
+        else:
+            p_name = f"rule_{idx}_port"
+            params[p_name] = int(port_str)
+            port_cond = f"(sport = %({p_name})s OR dport = %({p_name})s)"
+            sub_conds.append(port_cond)
+
+    if not sub_conds:
+        return "1"
+    elif len(sub_conds) == 1:
+        return sub_conds[0]
+    else:
+        return f"({' AND '.join(sub_conds)})"
+
+def generate_audit_insert_sql(
+    table_name: str,
+    rules: List[Dict[str, Any]],
+    start_time_str: str,
+    end_time_str: str,
+    current_run_str: str
+) -> Tuple[str, str, Dict[str, Any]]:
+    params: Dict[str, Any] = {
+        "start": start_time_str,
+        "end": end_time_str,
+        "match_ts": current_run_str
+    }
+    
+    rule_conds = []
+    multi_if_ip = []
+    multi_if_port = []
+    multi_if_flag = []
+    
+    for idx, r in enumerate(rules):
+        cond = build_rule_sql_condition(r, idx, params)
+        rule_conds.append(cond)
+        
+        # rule_ip param
+        ip_val = r.get("ip")
+        if ip_val:
+            p_ip = f"r_{idx}_ip_val"
+            params[p_ip] = str(ip_val)
+            multi_if_ip.append(f"{cond}, %({p_ip})s")
+        else:
+            multi_if_ip.append(f"{cond}, CAST(NULL, 'Nullable(String)')")
+            
+        # rule_port param
+        port_val = r.get("port")
+        if port_val is not None and str(port_val).strip() != "":
+            p_port = f"r_{idx}_port_val"
+            params[p_port] = str(port_val)
+            multi_if_port.append(f"{cond}, %({p_port})s")
+        else:
+            multi_if_port.append(f"{cond}, CAST(NULL, 'Nullable(String)')")
+            
+        # rule_flag param
+        flag_val = r.get("flag", "anomaly")
+        p_flag = f"r_{idx}_flag_val"
+        params[p_flag] = flag_val
+        multi_if_flag.append(f"{cond}, %({p_flag})s")
+        
+    combined_cond = " OR ".join(f"({c})" for c in rule_conds)
+    
+    # Build multiIf expressions
+    multi_ip_sql = f"multiIf({', '.join(multi_if_ip)}, CAST(NULL, 'Nullable(String)'))"
+    multi_port_sql = f"multiIf({', '.join(multi_if_port)}, CAST(NULL, 'Nullable(String)'))"
+    multi_flag_sql = f"multiIf({', '.join(multi_if_flag)}, 'anomaly')"
+    
+    count_sql = f"""
+        SELECT count()
+        FROM {table_name}
+        WHERE ts >= %(start)s AND ts < %(end)s
+          AND ({combined_cond})
+    """.strip()
+    
+    insert_sql = f"""
+        INSERT INTO matched_flows (
+            id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts,
+            rule_ip, rule_port, match_flag, match_ts
+        )
+        SELECT
+            id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts,
+            {multi_ip_sql} AS rule_ip,
+            {multi_port_sql} AS rule_port,
+            {multi_flag_sql} AS match_flag,
+            toDateTime(%(match_ts)s) AS match_ts
+        FROM {table_name}
+        WHERE ts >= %(start)s AND ts < %(end)s
+          AND ({combined_cond})
+    """.strip()
+    
+    return count_sql, insert_sql, params
+
 def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
     print("[Audit] Starting traffic audit...", flush=True)
     try:
@@ -1788,8 +2005,6 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
             conn.close()
             return {"status": "skipped", "records_matched": 0, "message": "No audit rules configured."}
             
-        parsed_rules = parse_rule_criteria(rules)
-        
         if start_time_str:
             try:
                 if 'T' in start_time_str:
@@ -1823,64 +2038,75 @@ def run_traffic_audit(start_time_str: Optional[str] = None) -> Dict[str, Any]:
         print(f"[Audit] Audit range: {last_run_str} to {current_run_str} (UTC)", flush=True)
         
         client = get_ch_client()
+        # Guarantee matched_flows table exists
+        ensure_matched_flows_table(client)
         tables = ["ipfix", "netflow9"]
-        all_matched_records = []
+        total_matched_count = 0
         
-        for table in tables:
-            query = f"""
-                SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts
-                FROM {table}
-                WHERE ts >= %(start)s AND ts < %(end)s
-            """
-            result = client.query(query, parameters={"start": last_run_str, "end": current_run_str})
-            column_names = result.column_names
-            rows = result.result_rows
-            
-            for row_vals in rows:
-                flow = dict(zip(column_names, row_vals))
-                matching_rule = check_flow_match(flow, parsed_rules)
-                if matching_rule:
-                    if isinstance(flow.get("ts"), datetime):
-                        flow["ts"] = flow["ts"].replace(tzinfo=timezone.utc)
-                    flow["rule_ip"] = matching_rule["ip_raw"]
-                    flow["rule_port"] = matching_rule["port_raw"]
-                    flow["match_flag"] = matching_rule["flag"]
-                    flow["match_ts"] = current_run_dt
-                    all_matched_records.append(flow)
-                    
-        if all_matched_records:
-            insert_data = []
-            for r in all_matched_records:
-                insert_data.append([
-                    r["id"],
-                    r["exporter"],
-                    r["proto"],
-                    r["src"],
-                    r["dst"],
-                    r.get("sport", 0),
-                    r.get("dport", 0),
-                    r.get("packets", 0),
-                    r.get("octets", 0),
-                    r.get("protocol"),
-                    r["json_data"],
-                    r["ts"],
-                    r["rule_ip"],
-                    r["rule_port"],
-                    r["match_flag"],
-                    r["match_ts"]
-                ])
+        # High Performance Fast-Path: In-database vectorized ClickHouse execution
+        try:
+            for table in tables:
+                count_sql, insert_sql, params = generate_audit_insert_sql(
+                    table, rules, last_run_str, current_run_str, current_run_str
+                )
                 
-            client.insert("matched_flows", insert_data, column_names=[
-                "id", "exporter", "proto", "src", "dst", "sport", "dport", "packets", "octets", "protocol", "json_data", "ts", "rule_ip", "rule_port", "match_flag", "match_ts"
-            ])
+                # 1. Fast check count in ClickHouse
+                count_res = client.query(count_sql, parameters=params)
+                matched_in_table = count_res.result_rows[0][0] if count_res.result_rows else 0
+                
+                print(f"[Audit Fast-Path] Table '{table}': {matched_in_table} flows matched.", flush=True)
+                
+                if matched_in_table > 0:
+                    # 2. Vectorized direct insert within ClickHouse
+                    client.command(insert_sql, parameters=params)
+                    total_matched_count += matched_in_table
+                    
+        except Exception as fast_path_err:
+            print(f"[Audit Fast-Path Warning] Direct SQL execution encountered error: {fast_path_err}. Falling back to row-by-row matching...", flush=True)
+            # Fallback path if direct SQL fails (safety net)
+            parsed_rules = parse_rule_criteria(rules)
+            all_matched_records = []
+            for table in tables:
+                query = f"""
+                    SELECT id, exporter, proto, src, dst, sport, dport, packets, octets, protocol, json_data, ts
+                    FROM {table}
+                    WHERE ts >= %(start)s AND ts < %(end)s
+                """
+                result = client.query(query, parameters={"start": last_run_str, "end": current_run_str})
+                column_names = result.column_names
+                for row_vals in result.result_rows:
+                    flow = dict(zip(column_names, row_vals))
+                    matching_rule = check_flow_match(flow, parsed_rules)
+                    if matching_rule:
+                        if isinstance(flow.get("ts"), datetime):
+                            flow["ts"] = flow["ts"].replace(tzinfo=timezone.utc)
+                        flow["rule_ip"] = matching_rule["ip_raw"]
+                        flow["rule_port"] = matching_rule["port_raw"]
+                        flow["match_flag"] = matching_rule["flag"]
+                        flow["match_ts"] = current_run_dt
+                        all_matched_records.append(flow)
+                        
+            if all_matched_records:
+                insert_data = [
+                    [
+                        r["id"], r["exporter"], r["proto"], r["src"], r["dst"],
+                        r.get("sport", 0), r.get("dport", 0), r.get("packets", 0),
+                        r.get("octets", 0), r.get("protocol"), r["json_data"], r["ts"],
+                        r["rule_ip"], r["rule_port"], r["match_flag"], r["match_ts"]
+                    ] for r in all_matched_records
+                ]
+                client.insert("matched_flows", insert_data, column_names=[
+                    "id", "exporter", "proto", "src", "dst", "sport", "dport", "packets", "octets", "protocol", "json_data", "ts", "rule_ip", "rule_port", "match_flag", "match_ts"
+                ])
+            total_matched_count = len(all_matched_records)
             
         cur.execute("INSERT INTO audit_logs (run_ts, status, records_matched, message) VALUES (?, ?, ?, ?)",
-                    (current_run_str, "success", len(all_matched_records), f"Audit completed. Found {len(all_matched_records)} matches."))
+                    (current_run_str, "success", total_matched_count, f"Audit completed. Found {total_matched_count} matches."))
         conn.commit()
         conn.close()
         
-        print(f"[Audit] Audit success. Matched and saved {len(all_matched_records)} records.", flush=True)
-        return {"status": "success", "records_matched": len(all_matched_records), "message": f"Audit completed. {len(all_matched_records)} records matched."}
+        print(f"[Audit] Audit success. Matched and saved {total_matched_count} records.", flush=True)
+        return {"status": "success", "records_matched": total_matched_count, "message": f"Audit completed. {total_matched_count} records matched."}
         
     except Exception as e:
         print(f"[Audit] Audit failed: {e}", flush=True)
@@ -2134,6 +2360,7 @@ def get_audit_matches_stats(
 ):
     try:
         client = get_ch_client()
+        ensure_matched_flows_table(client)
         where_clauses = []
         params = {}
         
@@ -2354,6 +2581,7 @@ def get_audit_matches(
 ):
     try:
         client = get_ch_client()
+        ensure_matched_flows_table(client)
         where_clauses = []
         params = {}
         
@@ -2450,6 +2678,7 @@ def get_audit_matches(
 def clear_audit_matches():
     try:
         client = get_ch_client()
+        ensure_matched_flows_table(client)
         client.command("TRUNCATE TABLE matched_flows")
         return {"status": "success", "message": "Permanently matched records cleared."}
     except Exception as e:
@@ -2460,6 +2689,7 @@ def clear_audit_matches():
 def delete_single_audit_match(match_id: str):
     try:
         client = get_ch_client()
+        ensure_matched_flows_table(client)
         client.command("ALTER TABLE matched_flows DELETE WHERE id = %(id)s", parameters={"id": match_id})
         return {"status": "success", "message": f"Match record {match_id} deleted."}
     except Exception as e:
@@ -2481,6 +2711,7 @@ def export_audit_matches(
     
     try:
         client = get_ch_client()
+        ensure_matched_flows_table(client)
         where_clauses = []
         params = {}
         

@@ -1,0 +1,13 @@
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+*.db
+*.csv
+collector.db
+flows.db
+ipinfo_lite.csv
+data/

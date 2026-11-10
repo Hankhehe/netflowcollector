@@ -1,35 +1,69 @@
 version: '3.8'
 
 services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: netflow-clickhouse
+    restart: unless-stopped
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-111aaaBBB}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - TZ=Asia/Taipei
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ${CLICKHOUSE_DATA_PATH:-/docker_data/clickhouse}:/var/lib/clickhouse
+      - ${CLICKHOUSE_LOG_PATH:-/docker_data/clickhouse/logs}:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   collector:
     build: .
-    container_name: flow-collector
+    container_name: netflow-collector
+    restart: unless-stopped
     ports:
       - "2055:2055/udp"
       - "4739:4739/udp"
     environment:
-      - CLICKHOUSE_HOST=192.168.10.12
+      - TZ=Asia/Taipei
+      - SQLITE_DB_PATH=/data/flows.db
+      - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PORT=8123
-      - CLICKHOUSE_USER=admin
-      - CLICKHOUSE_PASSWORD=111aaaBBB
-    command: python flow_collector.py --bind 0.0.0.0 --nf-port 2055 --ipfix-port 4739
-    restart: unless-stopped
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-111aaaBBB}
+    command: python flow_collector.py --bind 0.0.0.0
+    volumes:
+      - ./data:/data
+    depends_on:
+      clickhouse:
+        condition: service_healthy
 
   web-ui:
     build: .
-    container_name: flow-web-ui
-    environment:
-      - SQLITE_DB_PATH=/data/flows.db
-      - CLICKHOUSE_HOST=192.168.10.12
-      - CLICKHOUSE_PORT=8123
-      - CLICKHOUSE_USER=admin
-      - CLICKHOUSE_PASSWORD=111aaaBBB
+    container_name: netflow-web-ui
+    restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      - TZ=Asia/Taipei
+      - SQLITE_DB_PATH=/data/flows.db
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-admin}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-111aaaBBB}
     command: uvicorn web_ui:app --host 0.0.0.0 --port 8000
-    restart: unless-stopped
     volumes:
-      - db-data:/data
-
-volumes:
-  db-data:
+      - ./data:/data
+    depends_on:
+      clickhouse:
+        condition: service_healthy
