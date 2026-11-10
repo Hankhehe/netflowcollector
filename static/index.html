@@ -213,45 +213,6 @@
                                 </div>
                             </div>
                             
-                            <!-- IP Filter with Direction -->
-                            <div class="form-group" style="min-width: 220px;">
-                                <label for="filter-ip-val">IP 位址 (方向 / 類型)</label>
-                                <div style="display: flex; gap: 4px;">
-                                    <select id="filter-ip-dir" class="form-control form-control-sm select-dark" style="flex: 1.1;">
-                                        <option value="any">任一端 (來源/目的)</option>
-                                        <option value="src">僅來源 IP</option>
-                                        <option value="dst">僅目的 IP</option>
-                                    </select>
-                                    <select id="filter-ip-type" class="form-control form-control-sm select-dark" style="flex: 1.1;">
-                                        <option value="">任意 IP</option>
-                                        <option value="internal">私有 IP (Private)</option>
-                                        <option value="external">公網 IP (Public)</option>
-                                        <option value="custom">自訂 IP/前綴</option>
-                                    </select>
-                                </div>
-                                <input type="text" id="filter-ip-val" class="form-control form-control-sm" placeholder="例如: 192.168.1.1 或 10.0.0.0/8" style="margin-top: 6px; display: none;">
-                                <!-- Hidden legacy inputs to maintain backward compatibility if accessed -->
-                                <input type="hidden" id="filter-src-type" value="">
-                                <input type="hidden" id="filter-src" value="">
-                                <input type="hidden" id="filter-dst-type" value="">
-                                <input type="hidden" id="filter-dst" value="">
-                            </div>
-                            
-                            <!-- Port Filter with Direction -->
-                            <div class="form-group" style="min-width: 170px;">
-                                <label for="filter-port-val">Port 埠號 (方向)</label>
-                                <div style="display: flex; gap: 4px;">
-                                    <select id="filter-port-dir" class="form-control form-control-sm select-dark" style="flex: 1;">
-                                        <option value="any">任一端</option>
-                                        <option value="src">僅來源</option>
-                                        <option value="dst">僅目的</option>
-                                    </select>
-                                    <input type="number" id="filter-port-val" class="form-control form-control-sm" placeholder="例如: 80, 443" style="flex: 1.2;">
-                                </div>
-                                <input type="hidden" id="filter-sport" value="">
-                                <input type="hidden" id="filter-dport" value="">
-                            </div>
-                            
                             <!-- Protocols Custom Dropdown -->
                             <div class="form-group">
                                 <label>通訊協定</label>
@@ -300,6 +261,29 @@
                                     <button type="submit" class="btn btn-primary btn-sm-action">套用篩選</button>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- Tier 2: Dynamic Condition Builder -->
+                        <div class="dynamic-conditions-panel" id="flow-conditions-panel">
+                            <div class="conditions-panel-header">
+                                <div class="conditions-title-group">
+                                    <i data-lucide="filter" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
+                                    <span class="conditions-panel-title">條件式過濾 (支援來源/目的 IP、Port、協定自由組合)</span>
+                                    <div class="logic-toggle-group">
+                                        <span class="logic-label">條件關係:</span>
+                                        <button type="button" class="btn-logic active" data-view="flow" data-logic="AND">AND (且)</button>
+                                        <button type="button" class="btn-logic" data-view="flow" data-logic="OR">OR (或)</button>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn-outline-primary" id="btn-add-flow-condition">
+                                    <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+                                    <span>新增條件</span>
+                                </button>
+                            </div>
+                            <div class="conditions-list" id="flow-conditions-list">
+                                <!-- Rendered dynamically by JS -->
+                            </div>
+                        </div>
                         </div>
                     </form>
                 </div>
@@ -526,56 +510,41 @@
                         </div>
                     </div>
                     
-                    <!-- Inline Search Filters -->
-                    <div style="padding: 16px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
-                        <div class="form-group" style="flex: 1.4; min-width: 220px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">IP 位址 (方向 / 類型)</label>
-                            <div style="display: flex; gap: 4px;">
-                                <select id="filter-anomalies-ip-dir" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
-                                    <option value="any">任一端 (來源/目的)</option>
-                                    <option value="src">僅來源 IP</option>
-                                    <option value="dst">僅目的 IP</option>
-                                </select>
-                                <select id="filter-anomalies-ip-type" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
-                                    <option value="">任意 IP</option>
-                                    <option value="internal">私有 IP</option>
-                                    <option value="external">公網 IP</option>
-                                    <option value="custom">自訂 IP/前綴</option>
-                                </select>
-                            </div>
-                            <input type="text" id="filter-anomalies-ip-val" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem; display: none;" placeholder="例如: 192.168.1.1 或 10.0.0.0/8">
-                        </div>
-                        <div class="form-group" style="flex: 1.2; min-width: 170px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">Port 埠號 (方向)</label>
-                            <div style="display: flex; gap: 4px;">
-                                <select id="filter-anomalies-port-dir" class="form-control select-dark" style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-size: 0.82rem;">
-                                    <option value="any">任一端</option>
-                                    <option value="src">僅來源</option>
-                                    <option value="dst">僅目的</option>
-                                </select>
-                                <input type="number" id="filter-anomalies-port-val" class="form-control select-dark" style="flex: 1.2; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;" placeholder="例如: 80">
-                            </div>
-                        </div>
-                        <div class="form-group" style="flex: 0.8; min-width: 110px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">傳輸協定</label>
-                            <select id="filter-anomalies-proto" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
-                                <option value="">全部協定</option>
-                                <option value="TCP">TCP (6)</option>
-                                <option value="UDP">UDP (17)</option>
-                                <option value="ICMP">ICMP (1)</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="flex: 0.8; min-width: 110px; margin-bottom: 0; display: flex; flex-direction: column; gap: 4px;">
-                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted);">標記旗標</label>
-                            <select id="filter-anomalies-flag" class="form-control select-dark" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
+                    <!-- Search & Filter Controls -->
+                    <div style="padding: 14px 24px; background: rgba(0, 0, 0, 0.1); border-bottom: 1px solid var(--border-color); display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="min-width: 140px; margin-bottom: 0;">
+                            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 4px;">標記旗標</label>
+                            <select id="filter-anomalies-flag" class="form-control select-dark" style="height: 36px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); font-size: 0.85rem;">
                                 <option value="">所有標記</option>
                                 <option value="watch">關注 (Watch)</option>
                                 <option value="anomaly">異常 (Anomaly)</option>
                             </select>
                         </div>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" id="btn-apply-anomalies-search" class="btn btn-primary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">搜尋</button>
-                            <button type="button" id="btn-reset-anomalies-search" class="btn btn-secondary" style="height: 32px; padding: 0 14px; font-size: 0.82rem; border-radius: 6px;">重設</button>
+                        <div style="display: flex; gap: 8px; margin-left: auto;">
+                            <button type="button" id="btn-reset-anomalies-search" class="btn btn-secondary btn-sm-action">重設</button>
+                            <button type="button" id="btn-apply-anomalies-search" class="btn btn-primary btn-sm-action">套用篩選</button>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Condition Builder for Anomalies -->
+                    <div class="dynamic-conditions-panel" id="anomalies-conditions-panel" style="padding: 12px 24px; background: rgba(0, 0, 0, 0.05); border-bottom: 1px solid var(--border-color); margin-top: 0;">
+                        <div class="conditions-panel-header">
+                            <div class="conditions-title-group">
+                                <i data-lucide="filter" style="width: 15px; height: 15px; color: var(--color-primary);"></i>
+                                <span class="conditions-panel-title">條件式過濾 (支援來源/目的 IP、Port、協定自由組合)</span>
+                                <div class="logic-toggle-group">
+                                    <span class="logic-label">條件關係:</span>
+                                    <button type="button" class="btn-logic active" data-view="anomalies" data-logic="AND">AND (且)</button>
+                                    <button type="button" class="btn-logic" data-view="anomalies" data-logic="OR">OR (或)</button>
+                                </div>
+                            </div>
+                            <button type="button" class="btn-outline-primary" id="btn-add-anomalies-condition">
+                                <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+                                <span>新增條件</span>
+                            </button>
+                        </div>
+                        <div class="conditions-list" id="anomalies-conditions-list">
+                            <!-- Rendered dynamically by JS -->
                         </div>
                     </div>
 

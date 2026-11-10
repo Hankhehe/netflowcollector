@@ -315,8 +315,85 @@ def build_ip_where_clause(col: str, ip_query: str, params: dict, param_key: str)
     elif val == "external":
         return f"(isIPv4String({col}) OR isIPv6String({col})) AND NOT (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
     else:
-        params[param_key] = f"{ip_query}%"
-        return f"{col} LIKE %({param_key})s"
+        if "/" in ip_query:
+            params[param_key] = ip_query.strip()
+            return f"isIPAddressInRange({col}, %({param_key})s)"
+        else:
+            params[param_key] = f"{ip_query.strip()}%"
+            return f"{col} LIKE %({param_key})s"
+
+def parse_conditions_where_clause(conditions_json: Optional[str], logic: str, params: dict, prefix: str = "dyn") -> Optional[str]:
+    """Parse dynamic multi-condition JSON and return combined ClickHouse SQL clause."""
+    if not conditions_json or conditions_json == "[]":
+        return None
+    try:
+        import json
+        cond_list = json.loads(conditions_json)
+        if not isinstance(cond_list, list) or not cond_list:
+            return None
+        
+        clauses = []
+        for idx, item in enumerate(cond_list):
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get("field", "")).strip().lower()
+            val = str(item.get("val", "")).strip()
+            if not val:
+                continue
+
+            sub_key = f"{prefix}_{idx}"
+            if field in ("src", "src_ip"):
+                clauses.append(build_ip_where_clause("src", val, params, f"{sub_key}_src"))
+            elif field in ("dst", "dst_ip"):
+                clauses.append(build_ip_where_clause("dst", val, params, f"{sub_key}_dst"))
+            elif field in ("ip", "any_ip"):
+                c_src = build_ip_where_clause("src", val, params, f"{sub_key}_asrc")
+                c_dst = build_ip_where_clause("dst", val, params, f"{sub_key}_adst")
+                clauses.append(f"({c_src} OR {c_dst})")
+            elif field in ("sport", "src_port"):
+                try:
+                    params[f"{sub_key}_sport"] = int(val)
+                    clauses.append(f"sport = %({sub_key}_sport)s")
+                except ValueError:
+                    pass
+            elif field in ("dport", "dst_port"):
+                try:
+                    params[f"{sub_key}_dport"] = int(val)
+                    clauses.append(f"dport = %({sub_key}_dport)s")
+                except ValueError:
+                    pass
+            elif field in ("port", "any_port"):
+                try:
+                    params[f"{sub_key}_aport"] = int(val)
+                    clauses.append(f"(sport = %({sub_key}_aport)s OR dport = %({sub_key}_aport)s)")
+                except ValueError:
+                    pass
+            elif field in ("proto", "protocol"):
+                p_num = None
+                for num, name in PROTO_NAME_MAP.items():
+                    if name.upper() == val.upper():
+                        p_num = num
+                        break
+                if p_num is not None:
+                    params[f"{sub_key}_pnum"] = p_num
+                    params[f"{sub_key}_pstr"] = val
+                    clauses.append(f"(proto ILIKE %({sub_key}_pstr)s OR protocol = %({sub_key}_pnum)s)")
+                elif val.isdigit():
+                    params[f"{sub_key}_pnum"] = int(val)
+                    params[f"{sub_key}_pstr"] = val
+                    clauses.append(f"(proto ILIKE %({sub_key}_pstr)s OR protocol = %({sub_key}_pnum)s)")
+                else:
+                    params[f"{sub_key}_pstr"] = val
+                    clauses.append(f"proto ILIKE %({sub_key}_pstr)s")
+
+        if not clauses:
+            return None
+
+        join_logic = " OR " if str(logic).strip().upper() == "OR" else " AND "
+        return f"({join_logic.join(clauses)})"
+    except Exception as e:
+        print(f"[parse_conditions_where_clause] Error: {e}", file=sys.stderr)
+        return None
 
 def resolve_ip_alias(ip_str: str) -> Optional[str]:
     if not ip_str:
@@ -1273,6 +1350,8 @@ def get_flows(
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
     exporter: Optional[str] = Query(None, description="Exporter IP"),
+    conditions: Optional[str] = Query(None, description="JSON string of dynamic conditions list"),
+    logic: str = Query("AND", description="Combination logic: 'AND' or 'OR'"),
     time_range: str = Query("all", description="Time range: '10m', '1h', '24h', '7d', 'all'"),
     start_time: Optional[str] = Query(None, description="Start UTC timestamp (YYYY-MM-DD HH:MM:SS)"),
     end_time: Optional[str] = Query(None, description="End UTC timestamp (YYYY-MM-DD HH:MM:SS)"),
@@ -1289,23 +1368,27 @@ def get_flows(
         where_clauses = []
         params = {}
 
-        if ip:
-            src_c = build_ip_where_clause("src", ip, params, "ip_src")
-            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
-            where_clauses.append(f"({src_c} OR {dst_c})")
-        if src:
-            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
-        if dst:
-            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
-        if port is not None:
-            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
-            params["port"] = port
-        if sport is not None:
-            where_clauses.append("sport = %(sport)s")
-            params["sport"] = sport
-        if dport is not None:
-            where_clauses.append("dport = %(dport)s")
-            params["dport"] = dport
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "flow_dyn")
+        if dyn_clause:
+            where_clauses.append(dyn_clause)
+        else:
+            if ip:
+                src_c = build_ip_where_clause("src", ip, params, "ip_src")
+                dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+                where_clauses.append(f"({src_c} OR {dst_c})")
+            if src:
+                where_clauses.append(build_ip_where_clause("src", src, params, "src"))
+            if dst:
+                where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+            if port is not None:
+                where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+                params["port"] = port
+            if sport is not None:
+                where_clauses.append("sport = %(sport)s")
+                params["sport"] = sport
+            if dport is not None:
+                where_clauses.append("dport = %(dport)s")
+                params["dport"] = dport
         if exporter:
             exp_parts = [e.strip() for e in exporter.split(",") if e.strip()]
             if exp_parts:
@@ -1553,6 +1636,8 @@ def export_flows(
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
     exporter: Optional[str] = Query(None, description="Exporter IP"),
+    conditions: Optional[str] = Query(None, description="JSON string of dynamic conditions list"),
+    logic: str = Query("AND", description="Combination logic: 'AND' or 'OR'"),
     time_range: str = Query("all", description="Time range: '10m', '1h', '24h', '7d', 'all'"),
     start_time: Optional[str] = Query(None, description="Start UTC timestamp (YYYY-MM-DD HH:MM:SS)"),
     end_time: Optional[str] = Query(None, description="End UTC timestamp (YYYY-MM-DD HH:MM:SS)"),
@@ -1571,23 +1656,27 @@ def export_flows(
         where_clauses = []
         params = {}
 
-        if ip:
-            src_c = build_ip_where_clause("src", ip, params, "ip_src")
-            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
-            where_clauses.append(f"({src_c} OR {dst_c})")
-        if src:
-            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
-        if dst:
-            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
-        if port is not None:
-            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
-            params["port"] = port
-        if sport is not None:
-            where_clauses.append("sport = %(sport)s")
-            params["sport"] = sport
-        if dport is not None:
-            where_clauses.append("dport = %(dport)s")
-            params["dport"] = dport
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "flow_exp_dyn")
+        if dyn_clause:
+            where_clauses.append(dyn_clause)
+        else:
+            if ip:
+                src_c = build_ip_where_clause("src", ip, params, "ip_src")
+                dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+                where_clauses.append(f"({src_c} OR {dst_c})")
+            if src:
+                where_clauses.append(build_ip_where_clause("src", src, params, "src"))
+            if dst:
+                where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+            if port is not None:
+                where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+                params["port"] = port
+            if sport is not None:
+                where_clauses.append("sport = %(sport)s")
+                params["sport"] = sport
+            if dport is not None:
+                where_clauses.append("dport = %(dport)s")
+                params["dport"] = dport
         if exporter:
             exp_parts = [e.strip() for e in exporter.split(",") if e.strip()]
             if exp_parts:
@@ -1864,6 +1953,8 @@ def get_stats(
     dport: Optional[int] = Query(None, description="Destination port"),
     proto: Optional[str] = Query(None, description="Protocol list, comma-separated"),
     exporter: Optional[str] = Query(None, description="Exporter IP"),
+    conditions: Optional[str] = Query(None, description="JSON string of dynamic conditions list"),
+    logic: str = Query("AND", description="Combination logic: 'AND' or 'OR'"),
     time_range: str = Query("24h", description="Time range for stats: '1h', '24h', '7d', 'all'"),
     start_time: Optional[str] = Query(None, description="Start UTC timestamp (YYYY-MM-DD HH:MM:SS)"),
     end_time: Optional[str] = Query(None, description="End UTC timestamp (YYYY-MM-DD HH:MM:SS)")
@@ -1881,23 +1972,28 @@ def get_stats(
             if exp_parts:
                 where_clauses.append("exporter IN %(exporter_list)s")
                 params["exporter_list"] = tuple(exp_parts)
-        if ip:
-            src_c = build_ip_where_clause("src", ip, params, "ip_src")
-            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
-            where_clauses.append(f"({src_c} OR {dst_c})")
-        if src:
-            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
-        if dst:
-            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
-        if port is not None:
-            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
-            params["port"] = port
-        if sport is not None:
-            where_clauses.append("sport = %(sport)s")
-            params["sport"] = sport
-        if dport is not None:
-            where_clauses.append("dport = %(dport)s")
-            params["dport"] = dport
+
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "stats_dyn")
+        if dyn_clause:
+            where_clauses.append(dyn_clause)
+        else:
+            if ip:
+                src_c = build_ip_where_clause("src", ip, params, "ip_src")
+                dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+                where_clauses.append(f"({src_c} OR {dst_c})")
+            if src:
+                where_clauses.append(build_ip_where_clause("src", src, params, "src"))
+            if dst:
+                where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+            if port is not None:
+                where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+                params["port"] = port
+            if sport is not None:
+                where_clauses.append("sport = %(sport)s")
+                params["sport"] = sport
+            if dport is not None:
+                where_clauses.append("dport = %(dport)s")
+                params["dport"] = dport
 
         # Handle Protocol checklist
         if proto:
@@ -3144,7 +3240,9 @@ def get_audit_matches_stats(
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
     proto: Optional[str] = Query(None),
-    flag: Optional[str] = Query(None)
+    flag: Optional[str] = Query(None),
+    conditions: Optional[str] = Query(None, description="JSON string of dynamic conditions list"),
+    logic: str = Query("AND", description="Combination logic: 'AND' or 'OR'")
 ):
     try:
         client = get_ch_client()
@@ -3152,46 +3250,50 @@ def get_audit_matches_stats(
         where_clauses = []
         params = {}
         
-        if ip:
-            src_c = build_ip_where_clause("src", ip, params, "ip_src")
-            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
-            where_clauses.append(f"({src_c} OR {dst_c})")
-        if src:
-            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
-        if dst:
-            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
-        if sport is not None:
-            where_clauses.append("sport = %(sport)s")
-            params["sport"] = sport
-        if dport is not None:
-            where_clauses.append("dport = %(dport)s")
-            params["dport"] = dport
-        if port is not None:
-            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
-            params["port"] = port
-        if proto:
-            proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
-            proto_clauses = []
-            for idx, p in enumerate(proto_parts):
-                key = f"proto_p_{idx}"
-                params[key] = p
-                p_num = None
-                for num, name in PROTO_NAME_MAP.items():
-                    if name.upper() == p.upper():
-                        p_num = num
-                        break
-                if p_num is not None:
-                    num_key = f"proto_num_{idx}"
-                    params[num_key] = p_num
-                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
-                elif p.isdigit():
-                    num_key = f"proto_num_{idx}"
-                    params[num_key] = int(p)
-                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
-                else:
-                    proto_clauses.append(f"proto ILIKE %({key})s")
-            if proto_clauses:
-                where_clauses.append(f"({' OR '.join(proto_clauses)})")
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "audit_stats_dyn")
+        if dyn_clause:
+            where_clauses.append(dyn_clause)
+        else:
+            if ip:
+                src_c = build_ip_where_clause("src", ip, params, "ip_src")
+                dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+                where_clauses.append(f"({src_c} OR {dst_c})")
+            if src:
+                where_clauses.append(build_ip_where_clause("src", src, params, "src"))
+            if dst:
+                where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+            if sport is not None:
+                where_clauses.append("sport = %(sport)s")
+                params["sport"] = sport
+            if dport is not None:
+                where_clauses.append("dport = %(dport)s")
+                params["dport"] = dport
+            if port is not None:
+                where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+                params["port"] = port
+            if proto:
+                proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
+                proto_clauses = []
+                for idx, p in enumerate(proto_parts):
+                    key = f"proto_p_{idx}"
+                    params[key] = p
+                    p_num = None
+                    for num, name in PROTO_NAME_MAP.items():
+                        if name.upper() == p.upper():
+                            p_num = num
+                            break
+                    if p_num is not None:
+                        num_key = f"proto_num_{idx}"
+                        params[num_key] = p_num
+                        proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                    elif p.isdigit():
+                        num_key = f"proto_num_{idx}"
+                        params[num_key] = int(p)
+                        proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                    else:
+                        proto_clauses.append(f"proto ILIKE %({key})s")
+                if proto_clauses:
+                    where_clauses.append(f"({' OR '.join(proto_clauses)})")
         if flag:
             where_clauses.append("match_flag = %(flag)s")
             params["flag"] = flag.strip().lower()
@@ -3393,6 +3495,8 @@ def get_audit_matches(
     port: Optional[int] = Query(None),
     proto: Optional[str] = Query(None),
     flag: Optional[str] = Query(None),
+    conditions: Optional[str] = Query(None, description="JSON string of dynamic conditions list"),
+    logic: str = Query("AND", description="Combination logic: 'AND' or 'OR'"),
     sort_by: str = Query("match_ts"),
     sort_order: str = Query("desc")
 ):
@@ -3402,46 +3506,50 @@ def get_audit_matches(
         where_clauses = []
         params = {}
         
-        if ip:
-            src_c = build_ip_where_clause("src", ip, params, "ip_src")
-            dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
-            where_clauses.append(f"({src_c} OR {dst_c})")
-        if src:
-            where_clauses.append(build_ip_where_clause("src", src, params, "src"))
-        if dst:
-            where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
-        if sport is not None:
-            where_clauses.append("sport = %(sport)s")
-            params["sport"] = sport
-        if dport is not None:
-            where_clauses.append("dport = %(dport)s")
-            params["dport"] = dport
-        if port is not None:
-            where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
-            params["port"] = port
-        if proto:
-            proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
-            proto_clauses = []
-            for idx, p in enumerate(proto_parts):
-                key = f"proto_p_{idx}"
-                params[key] = p
-                p_num = None
-                for num, name in PROTO_NAME_MAP.items():
-                    if name.upper() == p.upper():
-                        p_num = num
-                        break
-                if p_num is not None:
-                    num_key = f"proto_num_{idx}"
-                    params[num_key] = p_num
-                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
-                elif p.isdigit():
-                    num_key = f"proto_num_{idx}"
-                    params[num_key] = int(p)
-                    proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
-                else:
-                    proto_clauses.append(f"proto ILIKE %({key})s")
-            if proto_clauses:
-                where_clauses.append(f"({' OR '.join(proto_clauses)})")
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "audit_dyn")
+        if dyn_clause:
+            where_clauses.append(dyn_clause)
+        else:
+            if ip:
+                src_c = build_ip_where_clause("src", ip, params, "ip_src")
+                dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")
+                where_clauses.append(f"({src_c} OR {dst_c})")
+            if src:
+                where_clauses.append(build_ip_where_clause("src", src, params, "src"))
+            if dst:
+                where_clauses.append(build_ip_where_clause("dst", dst, params, "dst"))
+            if sport is not None:
+                where_clauses.append("sport = %(sport)s")
+                params["sport"] = sport
+            if dport is not None:
+                where_clauses.append("dport = %(dport)s")
+                params["dport"] = dport
+            if port is not None:
+                where_clauses.append("(sport = %(port)s OR dport = %(port)s)")
+                params["port"] = port
+            if proto:
+                proto_parts = [p.strip() for p in proto.split(",") if p.strip()]
+                proto_clauses = []
+                for idx, p in enumerate(proto_parts):
+                    key = f"proto_p_{idx}"
+                    params[key] = p
+                    p_num = None
+                    for num, name in PROTO_NAME_MAP.items():
+                        if name.upper() == p.upper():
+                            p_num = num
+                            break
+                    if p_num is not None:
+                        num_key = f"proto_num_{idx}"
+                        params[num_key] = p_num
+                        proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                    elif p.isdigit():
+                        num_key = f"proto_num_{idx}"
+                        params[num_key] = int(p)
+                        proto_clauses.append(f"(proto ILIKE %({key})s OR protocol = %({num_key})s)")
+                    else:
+                        proto_clauses.append(f"proto ILIKE %({key})s")
+                if proto_clauses:
+                    where_clauses.append(f"({' OR '.join(proto_clauses)})")
         if flag:
             where_clauses.append("match_flag = %(flag)s")
             params["flag"] = flag.strip().lower()
@@ -3553,7 +3661,9 @@ def export_audit_matches(
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
     proto: Optional[str] = Query(None),
-    flag: Optional[str] = Query(None)
+    flag: Optional[str] = Query(None),
+    conditions: Optional[str] = Query(None),
+    logic: str = Query("AND")
 ):
     import io
     import csv
@@ -3565,6 +3675,10 @@ def export_audit_matches(
         where_clauses = []
         params = {}
         
+        dyn_clause = parse_conditions_where_clause(conditions, logic, params, "audit_exp_dyn")
+        if dyn_clause:
+            where_clauses.append(f"({dyn_clause})")
+            
         if ip:
             src_c = build_ip_where_clause("src", ip, params, "ip_src")
             dst_c = build_ip_where_clause("dst", ip, params, "ip_dst")

@@ -15,6 +15,8 @@ let state = {
         sport: '',
         dport: '',
         proto: '',
+        conditions: [],
+        logic: 'AND',
         timeRange: '24h' // linked to top-right select
     },
     pagination: {
@@ -54,7 +56,9 @@ let state = {
         sport: '',
         dport: '',
         proto: '',
-        flag: ''
+        flag: '',
+        conditions: [],
+        logic: 'AND'
     },
     sorting: {
         by: 'ts',
@@ -180,6 +184,10 @@ const els = {
     filterSport: document.getElementById('filter-sport'),
     filterDport: document.getElementById('filter-dport'),
     btnResetFilters: document.getElementById('btn-reset-filters'),
+    btnAddFlowCondition: document.getElementById('btn-add-flow-condition'),
+    flowConditionsList: document.getElementById('flow-conditions-list'),
+    btnAddAnomaliesCondition: document.getElementById('btn-add-anomalies-condition'),
+    anomaliesConditionsList: document.getElementById('anomalies-conditions-list'),
     filterProtoGroup: document.getElementById('filter-proto-group'),
     chartContextMenu: document.getElementById('chart-context-menu'),
     
@@ -337,6 +345,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     initSidebarToggle();
+    setupConditionBuilders();
+    renderConditions('flow');
+    renderConditions('anomalies');
     setupEventListeners();
     setupHeaderSorting();
     updateHeaderSortIcons();
@@ -777,21 +788,9 @@ function setupEventListeners() {
 
     if (els.btnResetAnomaliesSearch) {
         els.btnResetAnomaliesSearch.addEventListener('click', () => {
-            const aIpDirEl = document.getElementById('filter-anomalies-ip-dir');
-            if (aIpDirEl) aIpDirEl.value = 'any';
-            const aIpTypeEl = document.getElementById('filter-anomalies-ip-type');
-            if (aIpTypeEl) aIpTypeEl.value = '';
-            const aIpValEl = document.getElementById('filter-anomalies-ip-val');
-            if (aIpValEl) {
-                aIpValEl.value = '';
-                aIpValEl.style.display = 'none';
-            }
-            const aPortDirEl = document.getElementById('filter-anomalies-port-dir');
-            if (aPortDirEl) aPortDirEl.value = 'any';
-            const aPortValEl = document.getElementById('filter-anomalies-port-val');
-            if (aPortValEl) aPortValEl.value = '';
-            const aProtoEl = document.getElementById('filter-anomalies-proto');
-            if (aProtoEl) aProtoEl.value = '';
+            state.anomaliesFilters.conditions = [];
+            state.anomaliesFilters.logic = 'AND';
+            renderConditions('anomalies');
             const aFlagEl = document.getElementById('filter-anomalies-flag');
             if (aFlagEl) aFlagEl.value = '';
             
@@ -814,6 +813,25 @@ function setupEventListeners() {
             if (state.anomaliesFilters.dport) params.push(`dport=${encodeURIComponent(state.anomaliesFilters.dport)}`);
             if (state.anomaliesFilters.proto) params.push(`proto=${encodeURIComponent(state.anomaliesFilters.proto)}`);
             if (state.anomaliesFilters.flag) params.push(`flag=${encodeURIComponent(state.anomaliesFilters.flag)}`);
+            
+            // Dynamic multi-conditions
+            if (state.anomaliesFilters.conditions && state.anomaliesFilters.conditions.length > 0) {
+                const validConds = state.anomaliesFilters.conditions.map(c => {
+                    let finalVal = c.val;
+                    if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                        if (c.ipType && c.ipType !== 'custom') {
+                            finalVal = c.ipType;
+                        }
+                    }
+                    return { field: c.field, val: finalVal };
+                }).filter(c => c.val && String(c.val).trim() !== '');
+
+                if (validConds.length > 0) {
+                    params.push(`conditions=${encodeURIComponent(JSON.stringify(validConds))}`);
+                    params.push(`logic=${encodeURIComponent(state.anomaliesFilters.logic || 'AND')}`);
+                }
+            }
+
             window.open(url + params.join('&'), '_blank');
         });
     }
@@ -966,26 +984,10 @@ function setupEventListeners() {
     
     els.btnResetFilters.addEventListener('click', () => {
         els.filterForm.reset();
-        // Reset direction-aware IP & Port fields
-        const filterIpDir = document.getElementById('filter-ip-dir');
-        if (filterIpDir) filterIpDir.value = 'any';
-        const filterIpType = document.getElementById('filter-ip-type');
-        if (filterIpType) filterIpType.value = '';
-        const filterIpValInput = document.getElementById('filter-ip-val');
-        if (filterIpValInput) {
-            filterIpValInput.value = '';
-            filterIpValInput.style.display = 'none';
-        }
-        const filterPortDir = document.getElementById('filter-port-dir');
-        if (filterPortDir) filterPortDir.value = 'any';
-        const filterPortValInput = document.getElementById('filter-port-val');
-        if (filterPortValInput) filterPortValInput.value = '';
+        state.filters.conditions = [];
+        state.filters.logic = 'AND';
+        renderConditions('flow');
 
-        // Hide legacy custom IP inputs if present
-        const filterSrcInput = document.getElementById('filter-src');
-        const filterDstInput = document.getElementById('filter-dst');
-        if (filterSrcInput) filterSrcInput.style.display = 'none';
-        if (filterDstInput) filterDstInput.style.display = 'none';
         // Reset all custom checkboxes to checked by default
         const checkboxes = document.querySelectorAll('.custom-dropdown input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = true);
@@ -1322,108 +1324,66 @@ function updateTimeRangeSubtitle() {
 function applyFiltersFromForm() {
     state.filters.table = getSelectedTables();
     state.filters.exporter = getSelectedExporters();
-    
-    // Direction-aware IP filter
-    const ipDirEl = document.getElementById('filter-ip-dir');
-    const ipTypeEl = document.getElementById('filter-ip-type');
-    const ipValEl = document.getElementById('filter-ip-val');
-    const ipDir = ipDirEl ? ipDirEl.value : 'any';
-    let ipQuery = '';
-    if (ipTypeEl && ipTypeEl.value === 'custom') {
-        ipQuery = ipValEl ? ipValEl.value.trim() : '';
-    } else if (ipTypeEl) {
-        ipQuery = ipTypeEl.value;
-    }
-    
-    // Fallback to legacy src/dst inputs if direction elements not found
-    if (!ipDirEl) {
-        const srcTypeEl = document.getElementById('filter-src-type');
-        state.filters.src = (srcTypeEl && srcTypeEl.value !== 'custom') ? srcTypeEl.value : (els.filterSrc ? els.filterSrc.value.trim() : '');
-        const dstTypeEl = document.getElementById('filter-dst-type');
-        state.filters.dst = (dstTypeEl && dstTypeEl.value !== 'custom') ? dstTypeEl.value : (els.filterDst ? els.filterDst.value.trim() : '');
-        state.filters.ip = '';
-    } else {
-        state.filters.ip = '';
-        state.filters.src = '';
-        state.filters.dst = '';
-        if (ipDir === 'any') {
-            state.filters.ip = ipQuery;
-        } else if (ipDir === 'src') {
-            state.filters.src = ipQuery;
-        } else if (ipDir === 'dst') {
-            state.filters.dst = ipQuery;
-        }
-    }
-    
-    // Direction-aware Port filter
-    const portDirEl = document.getElementById('filter-port-dir');
-    const portValEl = document.getElementById('filter-port-val');
-    if (!portDirEl) {
-        state.filters.sport = els.filterSport ? els.filterSport.value.trim() : '';
-        state.filters.dport = els.filterDport ? els.filterDport.value.trim() : '';
-        state.filters.port = '';
-    } else {
-        const portDir = portDirEl.value;
-        const portVal = portValEl ? portValEl.value.trim() : '';
-        state.filters.port = '';
-        state.filters.sport = '';
-        state.filters.dport = '';
-        if (portDir === 'any') {
-            state.filters.port = portVal;
-        } else if (portDir === 'src') {
-            state.filters.sport = portVal;
-        } else if (portDir === 'dst') {
-            state.filters.dport = portVal;
-        }
-    }
-
     state.filters.proto = getSelectedProtocols();
+
+    // Read current inputs in condition builder into state.filters.conditions
+    const container = document.getElementById('flow-conditions-list');
+    if (container) {
+        const rows = container.querySelectorAll('.condition-row');
+        const conds = [];
+        rows.forEach(row => {
+            const fieldEl = row.querySelector('.cond-field');
+            const ipTypeEl = row.querySelector('.cond-iptype');
+            const valEl = row.querySelector('.cond-val');
+            if (fieldEl) {
+                const field = fieldEl.value;
+                const ipType = ipTypeEl ? ipTypeEl.value : 'custom';
+                let val = valEl ? valEl.value.trim() : '';
+                if (['src_ip', 'dst_ip', 'any_ip'].includes(field) && ipType !== 'custom') {
+                    val = ipType;
+                }
+                conds.push({
+                    id: row.getAttribute('data-id') || genConditionId(),
+                    field: field,
+                    ipType: ipType,
+                    val: val
+                });
+            }
+        });
+        state.filters.conditions = conds;
+    }
 }
 
 // Read anomalies form elements into state anomalies filters
 function applyAnomaliesFiltersFromForm() {
-    const dirEl = document.getElementById('filter-anomalies-ip-dir');
-    const typeEl = document.getElementById('filter-anomalies-ip-type');
-    const valEl = document.getElementById('filter-anomalies-ip-val');
-    const ipDir = dirEl ? dirEl.value : 'any';
-    let ipVal = '';
-    if (typeEl && typeEl.value === 'custom') {
-        ipVal = valEl ? valEl.value.trim() : '';
-    } else if (typeEl) {
-        ipVal = typeEl.value;
-    }
-
-    state.anomaliesFilters.ip = '';
-    state.anomaliesFilters.src = '';
-    state.anomaliesFilters.dst = '';
-    if (ipDir === 'any') {
-        state.anomaliesFilters.ip = ipVal;
-    } else if (ipDir === 'src') {
-        state.anomaliesFilters.src = ipVal;
-    } else if (ipDir === 'dst') {
-        state.anomaliesFilters.dst = ipVal;
-    }
-
-    const portDirEl = document.getElementById('filter-anomalies-port-dir');
-    const portValEl = document.getElementById('filter-anomalies-port-val');
-    const portDir = portDirEl ? portDirEl.value : 'any';
-    const portVal = portValEl ? portValEl.value.trim() : '';
-    state.anomaliesFilters.port = '';
-    state.anomaliesFilters.sport = '';
-    state.anomaliesFilters.dport = '';
-    if (portDir === 'any') {
-        state.anomaliesFilters.port = portVal;
-    } else if (portDir === 'src') {
-        state.anomaliesFilters.sport = portVal;
-    } else if (portDir === 'dst') {
-        state.anomaliesFilters.dport = portVal;
-    }
-
-    const protoEl = document.getElementById('filter-anomalies-proto');
-    if (protoEl) state.anomaliesFilters.proto = protoEl.value.trim();
-
     const flagEl = document.getElementById('filter-anomalies-flag');
     if (flagEl) state.anomaliesFilters.flag = flagEl.value.trim();
+
+    const container = document.getElementById('anomalies-conditions-list');
+    if (container) {
+        const rows = container.querySelectorAll('.condition-row');
+        const conds = [];
+        rows.forEach(row => {
+            const fieldEl = row.querySelector('.cond-field');
+            const ipTypeEl = row.querySelector('.cond-iptype');
+            const valEl = row.querySelector('.cond-val');
+            if (fieldEl) {
+                const field = fieldEl.value;
+                const ipType = ipTypeEl ? ipTypeEl.value : 'custom';
+                let val = valEl ? valEl.value.trim() : '';
+                if (['src_ip', 'dst_ip', 'any_ip'].includes(field) && ipType !== 'custom') {
+                    val = ipType;
+                }
+                conds.push({
+                    id: row.getAttribute('data-id') || genConditionId(),
+                    field: field,
+                    ipType: ipType,
+                    val: val
+                });
+            }
+        });
+        state.anomaliesFilters.conditions = conds;
+    }
 }
 
 // Helper: Format Bytes into human readable strings
@@ -1512,6 +1472,24 @@ async function fetchKPIs() {
     if (state.filters.startTime) params.append('start_time', state.filters.startTime);
     if (state.filters.endTime) params.append('end_time', state.filters.endTime);
 
+    // Dynamic conditions
+    if (state.filters.conditions && state.filters.conditions.length > 0) {
+        const validConds = state.filters.conditions.map(c => {
+            let finalVal = c.val;
+            if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                if (c.ipType && c.ipType !== 'custom') {
+                    finalVal = c.ipType;
+                }
+            }
+            return { field: c.field, val: finalVal };
+        }).filter(c => c.val && String(c.val).trim() !== '');
+
+        if (validConds.length > 0) {
+            params.append('conditions', JSON.stringify(validConds));
+            params.append('logic', state.filters.logic || 'AND');
+        }
+    }
+
     try {
         const res = await fetch(`/api/stats?${params.toString()}`);
         if (!res.ok) throw new Error('Failed to fetch KPI stats');
@@ -1547,6 +1525,25 @@ function getFlowQueryParams() {
     if (state.filters.proto) params.append('proto', state.filters.proto);
     if (state.filters.startTime) params.append('start_time', state.filters.startTime);
     if (state.filters.endTime) params.append('end_time', state.filters.endTime);
+
+    // Dynamic conditions
+    if (state.filters.conditions && state.filters.conditions.length > 0) {
+        const validConds = state.filters.conditions.map(c => {
+            let finalVal = c.val;
+            if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                if (c.ipType && c.ipType !== 'custom') {
+                    finalVal = c.ipType;
+                }
+            }
+            return { field: c.field, val: finalVal };
+        }).filter(c => c.val && String(c.val).trim() !== '');
+
+        if (validConds.length > 0) {
+            params.append('conditions', JSON.stringify(validConds));
+            params.append('logic', state.filters.logic || 'AND');
+        }
+    }
+
     return params;
 }
 
@@ -1787,6 +1784,24 @@ async function fetchStats() {
     if (state.filters.proto) params.append('proto', state.filters.proto);
     if (state.filters.startTime) params.append('start_time', state.filters.startTime);
     if (state.filters.endTime) params.append('end_time', state.filters.endTime);
+
+    // Dynamic conditions
+    if (state.filters.conditions && state.filters.conditions.length > 0) {
+        const validConds = state.filters.conditions.map(c => {
+            let finalVal = c.val;
+            if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                if (c.ipType && c.ipType !== 'custom') {
+                    finalVal = c.ipType;
+                }
+            }
+            return { field: c.field, val: finalVal };
+        }).filter(c => c.val && String(c.val).trim() !== '');
+
+        if (validConds.length > 0) {
+            params.append('conditions', JSON.stringify(validConds));
+            params.append('logic', state.filters.logic || 'AND');
+        }
+    }
 
     try {
         const res = await fetch(`/api/stats?${params.toString()}`);
@@ -3485,6 +3500,23 @@ async function fetchAnomalousReport() {
     if (state.anomaliesFilters.proto) url += `&proto=${encodeURIComponent(state.anomaliesFilters.proto)}`;
     if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
     
+    // Dynamic multi-conditions
+    if (state.anomaliesFilters.conditions && state.anomaliesFilters.conditions.length > 0) {
+        const validConds = state.anomaliesFilters.conditions.map(c => {
+            let finalVal = c.val;
+            if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                if (c.ipType && c.ipType !== 'custom') {
+                    finalVal = c.ipType;
+                }
+            }
+            return { field: c.field, val: finalVal };
+        }).filter(c => c.val && String(c.val).trim() !== '');
+
+        if (validConds.length > 0) {
+            url += `&conditions=${encodeURIComponent(JSON.stringify(validConds))}&logic=${encodeURIComponent(state.anomaliesFilters.logic || 'AND')}`;
+        }
+    }
+    
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch anomalous records');
@@ -3729,6 +3761,23 @@ async function fetchAnomalousReportStats() {
     if (state.anomaliesFilters.proto) url += `&proto=${encodeURIComponent(state.anomaliesFilters.proto)}`;
     if (state.anomaliesFilters.flag) url += `&flag=${encodeURIComponent(state.anomaliesFilters.flag)}`;
 
+    // Dynamic multi-conditions
+    if (state.anomaliesFilters.conditions && state.anomaliesFilters.conditions.length > 0) {
+        const validConds = state.anomaliesFilters.conditions.map(c => {
+            let finalVal = c.val;
+            if (['src_ip', 'dst_ip', 'any_ip'].includes(c.field)) {
+                if (c.ipType && c.ipType !== 'custom') {
+                    finalVal = c.ipType;
+                }
+            }
+            return { field: c.field, val: finalVal };
+        }).filter(c => c.val && String(c.val).trim() !== '');
+
+        if (validConds.length > 0) {
+            url += `&conditions=${encodeURIComponent(JSON.stringify(validConds))}&logic=${encodeURIComponent(state.anomaliesFilters.logic || 'AND')}`;
+        }
+    }
+
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch stats');
@@ -3868,6 +3917,256 @@ function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderC
     });
 }
 
+// Dynamic Condition Utilities
+let _conditionIdCounter = 0;
+function genConditionId() {
+    return 'cond_' + Date.now() + '_' + (++_conditionIdCounter);
+}
+
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Render dynamic conditions list for 'flow' or 'anomalies'
+function renderConditions(viewType) {
+    const isFlow = (viewType === 'flow');
+    const container = isFlow ? document.getElementById('flow-conditions-list') : document.getElementById('anomalies-conditions-list');
+    if (!container) return;
+
+    const conditions = isFlow ? (state.filters.conditions || []) : (state.anomaliesFilters.conditions || []);
+    const logic = isFlow ? (state.filters.logic || 'AND') : (state.anomaliesFilters.logic || 'AND');
+
+    // Update active logic buttons in UI
+    const logicBtns = document.querySelectorAll(`.btn-logic[data-view="${isFlow ? 'flow' : 'anomalies'}"]`);
+    logicBtns.forEach(btn => {
+        if (btn.getAttribute('data-logic') === logic) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    if (conditions.length === 0) {
+        container.innerHTML = `
+            <div class="conditions-empty-tip">
+                <i data-lucide="info" style="width: 14px; height: 14px; display: inline-block; vertical-align: -2px; margin-right: 4px;"></i>
+                尚未新增任何條件 (可點擊「＋ 新增條件」或直接點擊上方/下方圖表項目以追加為篩選條件)
+            </div>
+        `;
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons();
+        }
+        return;
+    }
+
+    let html = '';
+    conditions.forEach((cond, idx) => {
+        const badgeLabel = (idx === 0) ? '條件 1' : logic;
+        const badgeStyle = (idx === 0) ? 'background: rgba(255,255,255,0.08); color: var(--text-secondary);' : '';
+        const isIp = ['src_ip', 'dst_ip', 'any_ip'].includes(cond.field);
+        const isPort = ['src_port', 'dst_port', 'any_port'].includes(cond.field);
+        const isProto = cond.field === 'proto';
+
+        html += `
+            <div class="condition-row" data-id="${cond.id || ''}" data-index="${idx}">
+                <span class="condition-badge-logic" style="${badgeStyle}">${badgeLabel}</span>
+                <select class="condition-select cond-field" data-index="${idx}">
+                    <option value="src_ip" ${cond.field === 'src_ip' ? 'selected' : ''}>來源 IP</option>
+                    <option value="dst_ip" ${cond.field === 'dst_ip' ? 'selected' : ''}>目的 IP</option>
+                    <option value="any_ip" ${cond.field === 'any_ip' ? 'selected' : ''}>任一端 IP</option>
+                    <option value="src_port" ${cond.field === 'src_port' ? 'selected' : ''}>來源 Port</option>
+                    <option value="dst_port" ${cond.field === 'dst_port' ? 'selected' : ''}>目的 Port</option>
+                    <option value="any_port" ${cond.field === 'any_port' ? 'selected' : ''}>任一端 Port</option>
+                    <option value="proto" ${cond.field === 'proto' ? 'selected' : ''}>通訊協定</option>
+                </select>
+                <select class="condition-select cond-iptype" data-index="${idx}" style="display: ${isIp ? 'inline-block' : 'none'};">
+                    <option value="custom" ${cond.ipType === 'custom' ? 'selected' : ''}>自訂 IP / 前綴</option>
+                    <option value="internal" ${cond.ipType === 'internal' ? 'selected' : ''}>私有 IP (Private)</option>
+                    <option value="external" ${cond.ipType === 'external' ? 'selected' : ''}>公網 IP (Public)</option>
+                </select>
+                <input type="${isPort ? 'number' : 'text'}" 
+                       class="condition-input cond-val" 
+                       data-index="${idx}" 
+                       placeholder="${isIp ? '例如: 192.168.1.1 或 10.0.0.0/8' : (isPort ? '例如: 80, 443' : '例如: TCP 或 6')}" 
+                       value="${escapeHtml(cond.val || '')}" 
+                       style="display: ${isIp && cond.ipType !== 'custom' ? 'none' : 'block'};">
+                <button type="button" class="btn-remove-condition" data-index="${idx}" title="移除此條件">
+                    <i data-lucide="x" style="width: 15px; height: 15px;"></i>
+                </button>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+    }
+
+    // Attach row events
+    container.querySelectorAll('.cond-field').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.getAttribute('data-index'));
+            const field = e.target.value;
+            const targetCond = conditions[idx];
+            if (targetCond) {
+                targetCond.field = field;
+                if (['src_ip', 'dst_ip', 'any_ip'].includes(field)) {
+                    if (!targetCond.ipType) targetCond.ipType = 'custom';
+                }
+                renderConditions(viewType);
+            }
+        });
+    });
+
+    container.querySelectorAll('.cond-iptype').forEach(sel => {
+        sel.addEventListener('change', (e) => {
+            const idx = parseInt(e.target.getAttribute('data-index'));
+            const ipType = e.target.value;
+            const targetCond = conditions[idx];
+            if (targetCond) {
+                targetCond.ipType = ipType;
+                if (ipType !== 'custom') {
+                    targetCond.val = ipType;
+                } else if (targetCond.val === 'internal' || targetCond.val === 'external') {
+                    targetCond.val = '';
+                }
+                renderConditions(viewType);
+            }
+        });
+    });
+
+    container.querySelectorAll('.cond-val').forEach(inp => {
+        inp.addEventListener('input', (e) => {
+            const idx = parseInt(e.target.getAttribute('data-index'));
+            const targetCond = conditions[idx];
+            if (targetCond) {
+                targetCond.val = e.target.value;
+            }
+        });
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (isFlow) {
+                    applyFiltersFromForm();
+                    state.pagination.offset = 0;
+                    refreshData();
+                    fetchFlows();
+                    fetchStats();
+                } else {
+                    applyAnomaliesFiltersFromForm();
+                    state.anomaliesPagination.offset = 0;
+                    fetchAnomalousReport();
+                    fetchAnomalousReportStats();
+                }
+            }
+        });
+    });
+
+    container.querySelectorAll('.btn-remove-condition').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const idx = parseInt(btn.getAttribute('data-index'));
+            conditions.splice(idx, 1);
+            renderConditions(viewType);
+            if (isFlow) {
+                applyFiltersFromForm();
+                state.pagination.offset = 0;
+                refreshData();
+                fetchFlows();
+                fetchStats();
+            } else {
+                applyAnomaliesFiltersFromForm();
+                state.anomaliesPagination.offset = 0;
+                fetchAnomalousReport();
+                fetchAnomalousReportStats();
+            }
+        });
+    });
+}
+
+// Add a new dynamic condition
+function addCondition(viewType, field = 'src_ip', val = '', ipType = 'custom') {
+    const isFlow = (viewType === 'flow');
+    if (isFlow) {
+        if (!state.filters.conditions) state.filters.conditions = [];
+        state.filters.conditions.push({
+            id: genConditionId(),
+            field: field,
+            ipType: ['src_ip', 'dst_ip', 'any_ip'].includes(field) ? (ipType || 'custom') : '',
+            val: String(val || '')
+        });
+    } else {
+        if (!state.anomaliesFilters.conditions) state.anomaliesFilters.conditions = [];
+        state.anomaliesFilters.conditions.push({
+            id: genConditionId(),
+            field: field,
+            ipType: ['src_ip', 'dst_ip', 'any_ip'].includes(field) ? (ipType || 'custom') : '',
+            val: String(val || '')
+        });
+    }
+    renderConditions(viewType);
+    
+    // Focus last input
+    setTimeout(() => {
+        const container = isFlow ? document.getElementById('flow-conditions-list') : document.getElementById('anomalies-conditions-list');
+        if (container) {
+            const inputs = container.querySelectorAll('.cond-val');
+            if (inputs.length > 0) {
+                inputs[inputs.length - 1].focus();
+            }
+        }
+    }, 50);
+}
+
+// Setup Condition Builders controls
+function setupConditionBuilders() {
+    document.querySelectorAll('.btn-logic').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const view = btn.getAttribute('data-view');
+            const logic = btn.getAttribute('data-logic') || 'AND';
+            if (view === 'flow') {
+                state.filters.logic = logic;
+                renderConditions('flow');
+                applyFiltersFromForm();
+                state.pagination.offset = 0;
+                refreshData();
+                fetchFlows();
+                fetchStats();
+            } else {
+                state.anomaliesFilters.logic = logic;
+                renderConditions('anomalies');
+                applyAnomaliesFiltersFromForm();
+                state.anomaliesPagination.offset = 0;
+                fetchAnomalousReport();
+                fetchAnomalousReportStats();
+            }
+        });
+    });
+
+    const btnAddFlow = document.getElementById('btn-add-flow-condition');
+    if (btnAddFlow) {
+        btnAddFlow.addEventListener('click', (e) => {
+            e.preventDefault();
+            addCondition('flow', 'src_ip', '', 'custom');
+        });
+    }
+
+    const btnAddAnomalies = document.getElementById('btn-add-anomalies-condition');
+    if (btnAddAnomalies) {
+        btnAddAnomalies.addEventListener('click', (e) => {
+            e.preventDefault();
+            addCondition('anomalies', 'src_ip', '', 'custom');
+        });
+    }
+}
+
 // Chart Context Menu Handlers
 function showChartContextMenu(nativeEvent, itemType, rawVal, viewType, defaultDir) {
     let menu = document.getElementById('chart-context-menu');
@@ -3880,33 +4179,37 @@ function showChartContextMenu(nativeEvent, itemType, rawVal, viewType, defaultDi
 
     let html = '';
     if (itemType === 'ip') {
+        const primaryDir = defaultDir || 'any';
+        const secDir = primaryDir === 'src' ? 'dst' : (primaryDir === 'dst' ? 'src' : 'any');
         html += `
+            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="${primaryDir}" data-val="${rawVal}">
+                <i data-lucide="plus-circle"></i> <span>➕ 追加為${primaryDir === 'src' ? '來源 IP' : (primaryDir === 'dst' ? '目的 IP' : '任一端 IP')} (${rawVal})</span>
+            </div>
+            ${secDir !== primaryDir ? `
+            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="${secDir}" data-val="${rawVal}">
+                <i data-lucide="plus-circle"></i> <span>➕ 追加為${secDir === 'src' ? '來源 IP' : '目的 IP'} (${rawVal})</span>
+            </div>
+            ` : ''}
             <div class="chart-context-menu-item" data-action="filter-ip" data-dir="any" data-val="${rawVal}">
-                <i data-lucide="search"></i> <span>過濾為任一端 IP (${rawVal})</span>
-            </div>
-            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="src" data-val="${rawVal}">
-                <i data-lucide="arrow-up-right"></i> <span>僅過濾為來源 IP (${rawVal})</span>
-            </div>
-            <div class="chart-context-menu-item" data-action="filter-ip" data-dir="dst" data-val="${rawVal}">
-                <i data-lucide="arrow-down-left"></i> <span>僅過濾為目的 IP (${rawVal})</span>
+                <i data-lucide="search"></i> <span>➕ 追加為任一端 IP (${rawVal})</span>
             </div>
         `;
     } else if (itemType === 'port') {
         html += `
             <div class="chart-context-menu-item" data-action="filter-port" data-dir="any" data-val="${rawVal}">
-                <i data-lucide="search"></i> <span>過濾為任一端 Port (${rawVal})</span>
+                <i data-lucide="search"></i> <span>➕ 追加為任一端 Port (${rawVal})</span>
             </div>
             <div class="chart-context-menu-item" data-action="filter-port" data-dir="src" data-val="${rawVal}">
-                <i data-lucide="arrow-up-right"></i> <span>僅過濾為來源 Port (${rawVal})</span>
+                <i data-lucide="plus-circle"></i> <span>➕ 追加為來源 Port (${rawVal})</span>
             </div>
             <div class="chart-context-menu-item" data-action="filter-port" data-dir="dst" data-val="${rawVal}">
-                <i data-lucide="arrow-down-left"></i> <span>僅過濾為目的 Port (${rawVal})</span>
+                <i data-lucide="plus-circle"></i> <span>➕ 追加為目的 Port (${rawVal})</span>
             </div>
         `;
     } else if (itemType === 'proto') {
         html += `
             <div class="chart-context-menu-item" data-action="filter-proto" data-dir="any" data-val="${rawVal}">
-                <i data-lucide="activity"></i> <span>過濾此協定 (${rawVal})</span>
+                <i data-lucide="activity"></i> <span>➕ 追加為通訊協定 (${rawVal})</span>
             </div>
         `;
     }
@@ -3919,8 +4222,8 @@ function showChartContextMenu(nativeEvent, itemType, rawVal, viewType, defaultDi
     menu.style.display = 'block';
     const x = nativeEvent.clientX || 100;
     const y = nativeEvent.clientY || 100;
-    const menuWidth = 250;
-    const menuHeight = menu.offsetHeight || 130;
+    const menuWidth = 270;
+    const menuHeight = menu.offsetHeight || 140;
 
     const posX = (x + menuWidth > window.innerWidth) ? Math.max(10, x - menuWidth) : x;
     const posY = (y + menuHeight > window.innerHeight) ? Math.max(10, y - menuHeight) : y;
@@ -3945,54 +4248,24 @@ function hideChartContextMenu() {
 }
 
 function applyDrillDownFilter(viewType, action, dir, val) {
+    let field = 'any_ip';
+    if (action === 'filter-ip') {
+        field = dir === 'src' ? 'src_ip' : (dir === 'dst' ? 'dst_ip' : 'any_ip');
+    } else if (action === 'filter-port') {
+        field = dir === 'src' ? 'src_port' : (dir === 'dst' ? 'dst_port' : 'any_port');
+    } else if (action === 'filter-proto') {
+        field = 'proto';
+    }
+
     if (viewType === 'general') {
-        if (action === 'filter-ip') {
-            const dirEl = document.getElementById('filter-ip-dir');
-            const typeEl = document.getElementById('filter-ip-type');
-            const valEl = document.getElementById('filter-ip-val');
-            if (dirEl) dirEl.value = dir || 'any';
-            if (typeEl) typeEl.value = 'custom';
-            if (valEl) {
-                valEl.value = val;
-                valEl.style.display = 'block';
-            }
-        } else if (action === 'filter-port') {
-            const dirEl = document.getElementById('filter-port-dir');
-            const valEl = document.getElementById('filter-port-val');
-            if (dirEl) dirEl.value = dir || 'any';
-            if (valEl) valEl.value = val;
-        } else if (action === 'filter-proto') {
-            const checkboxes = document.querySelectorAll('#filter-proto-group input[type="checkbox"]');
-            checkboxes.forEach(cb => {
-                cb.checked = (cb.value.toUpperCase() === String(val).toUpperCase());
-            });
-            updateDropdownLabels();
-        }
+        addCondition('flow', field, val, 'custom');
         applyFiltersFromForm();
         state.pagination.offset = 0;
         refreshData();
         fetchFlows();
         fetchStats();
     } else if (viewType === 'anomalies') {
-        if (action === 'filter-ip') {
-            const dirEl = document.getElementById('filter-anomalies-ip-dir');
-            const typeEl = document.getElementById('filter-anomalies-ip-type');
-            const valEl = document.getElementById('filter-anomalies-ip-val');
-            if (dirEl) dirEl.value = dir || 'any';
-            if (typeEl) typeEl.value = 'custom';
-            if (valEl) {
-                valEl.value = val;
-                valEl.style.display = 'block';
-            }
-        } else if (action === 'filter-port') {
-            const dirEl = document.getElementById('filter-anomalies-port-dir');
-            const valEl = document.getElementById('filter-anomalies-port-val');
-            if (dirEl) dirEl.value = dir || 'any';
-            if (valEl) valEl.value = val;
-        } else if (action === 'filter-proto') {
-            const protoEl = document.getElementById('filter-anomalies-proto');
-            if (protoEl) protoEl.value = val;
-        }
+        addCondition('anomalies', field, val, 'custom');
         applyAnomaliesFiltersFromForm();
         state.anomaliesPagination.offset = 0;
         fetchAnomalousReport();
