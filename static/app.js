@@ -69,8 +69,18 @@ let state = {
         order: 'desc'
     },
     records: [], // Cache for current page records
-    charts: {}   // Store Chart.js instances
+    charts: {},  // Store Chart.js instances
+    abortControllers: {} // Active AbortController instances for cancelling stale requests
 };
+
+function getAbortSignal(key) {
+    if (state.abortControllers[key]) {
+        state.abortControllers[key].abort();
+    }
+    const ctrl = new AbortController();
+    state.abortControllers[key] = ctrl;
+    return ctrl.signal;
+}
 
 // UI Elements
 const els = {
@@ -782,7 +792,6 @@ function setupEventListeners() {
             applyAnomaliesFiltersFromForm();
             state.anomaliesPagination.offset = 0;
             fetchAnomalousReport();
-            fetchAnomalousReportStats();
         });
     }
 
@@ -797,7 +806,6 @@ function setupEventListeners() {
             applyAnomaliesFiltersFromForm();
             state.anomaliesPagination.offset = 0;
             fetchAnomalousReport();
-            fetchAnomalousReportStats();
         });
     }
 
@@ -995,8 +1003,6 @@ function setupEventListeners() {
         updateDropdownLabels();
         state.pagination.offset = 0;
         refreshData();
-        fetchFlows();
-        fetchStats();
     });
     
     // Page size dropdown
@@ -1444,13 +1450,24 @@ async function fetchExporterDropdown(skipRefresh = false) {
     }
 }
 
+// Helper to update KPI DOM elements from stats payload
+function updateKpiDom(data) {
+    if (!data) return;
+    if (els.kpiTotalFlows) els.kpiTotalFlows.innerText = formatNumber(data.total_flows);
+    if (els.kpiTotalBytes) els.kpiTotalBytes.innerText = formatBytes(data.total_bytes);
+    if (els.kpiTotalPackets) els.kpiTotalPackets.innerText = formatNumber(data.total_packets);
+    if (els.kpiTotalExporters && Array.isArray(data.top_exporters)) {
+        els.kpiTotalExporters.innerText = formatNumber(data.top_exporters.length);
+    }
+}
+
 // Refresh active tab and KPI totals
 function refreshData() {
     applyFiltersFromForm();
-    fetchKPIs();
     if (state.activeTab === 'explorer') {
+        fetchKPIs();
         fetchFlows();
-    } else {
+    } else if (state.activeTab === 'analytics') {
         fetchStats();
     }
 }
@@ -1491,15 +1508,13 @@ async function fetchKPIs() {
     }
 
     try {
-        const res = await fetch(`/api/stats?${params.toString()}`);
+        const signal = getAbortSignal('stats');
+        const res = await fetch(`/api/stats?${params.toString()}`, { signal });
         if (!res.ok) throw new Error('Failed to fetch KPI stats');
         const data = await res.json();
-        
-        els.kpiTotalFlows.innerText = formatNumber(data.total_flows);
-        els.kpiTotalBytes.innerText = formatBytes(data.total_bytes);
-        els.kpiTotalPackets.innerText = formatNumber(data.total_packets);
-        els.kpiTotalExporters.innerText = formatNumber(data.top_exporters.length);
+        updateKpiDom(data);
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching KPIs:', err);
     }
 }
@@ -1566,7 +1581,8 @@ async function fetchFlows() {
     params.append('offset', state.pagination.offset);
     
     try {
-        const res = await fetch(`/api/flows?${params.toString()}`);
+        const signal = getAbortSignal('flows');
+        const res = await fetch(`/api/flows?${params.toString()}`, { signal });
         if (!res.ok) throw new Error('查詢流量記錄失敗');
         const data = await res.json();
         
@@ -1576,6 +1592,7 @@ async function fetchFlows() {
         renderFlowsTable();
         renderPagination();
     } catch (err) {
+        if (err.name === 'AbortError') return;
         els.flowsTbody.innerHTML = `
             <tr>
                 <td colspan="${visibleColsCount}" class="text-center text-muted py-5">
@@ -1804,10 +1821,12 @@ async function fetchStats() {
     }
 
     try {
-        const res = await fetch(`/api/stats?${params.toString()}`);
+        const signal = getAbortSignal('stats');
+        const res = await fetch(`/api/stats?${params.toString()}`, { signal });
         if (!res.ok) throw new Error('Failed to fetch statistics');
         const data = await res.json();
         
+        updateKpiDom(data);
         renderTimeChart(data.traffic_over_time);
         renderBarChart(
             'chart-top-sources', 
@@ -1846,6 +1865,7 @@ async function fetchStats() {
         renderDoughnutChart('chart-exporters', data.top_exporters.map(x => x.exporter), data.top_exporters.map(x => x.flows));
         
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching stats:', err);
     }
 }
@@ -2693,7 +2713,8 @@ async function fetchIpAliases() {
     }
 
     try {
-        const res = await fetch(url);
+        const signal = getAbortSignal('ipAliases');
+        const res = await fetch(url, { signal });
         if (!res.ok) throw new Error('Failed to fetch IP aliases');
         const data = await res.json();
         
@@ -2702,6 +2723,7 @@ async function fetchIpAliases() {
         renderIpAliasesTable(data.records);
         renderIpAliasesPagination(data.total);
     } catch (err) {
+        if (err.name === 'AbortError') return;
         tbody.innerHTML = `
             <tr>
                 <td colspan="3" class="text-center text-muted py-3">
@@ -3264,7 +3286,8 @@ async function fetchAuditMatches() {
     if (state.auditFilters.flag) url += `&flag=${encodeURIComponent(state.auditFilters.flag)}`;
     
     try {
-        const response = await fetch(url);
+        const signal = getAbortSignal('auditMatches');
+        const response = await fetch(url, { signal });
         if (!response.ok) throw new Error('Failed to fetch matched records');
         const data = await response.json();
         
@@ -3275,6 +3298,7 @@ async function fetchAuditMatches() {
         renderAuditMatches(data.records);
         renderAuditPagination(data.total);
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching audit matches:', err);
         const tbody = els.auditMatchesTbody;
         if (tbody) {
@@ -3518,7 +3542,8 @@ async function fetchAnomalousReport() {
     }
     
     try {
-        const response = await fetch(url);
+        const signal = getAbortSignal('anomaliesReport');
+        const response = await fetch(url, { signal });
         if (!response.ok) throw new Error('Failed to fetch anomalous records');
         const data = await response.json();
         
@@ -3530,6 +3555,7 @@ async function fetchAnomalousReport() {
         renderAnomaliesPagination(data.total);
         fetchAnomalousReportStats();
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching anomalous reports:', err);
         const tbody = els.anomaliesTbody;
         if (tbody) {
@@ -3779,7 +3805,8 @@ async function fetchAnomalousReportStats() {
     }
 
     try {
-        const response = await fetch(url);
+        const signal = getAbortSignal('anomaliesStats');
+        const response = await fetch(url, { signal });
         if (!response.ok) throw new Error('Failed to fetch stats');
         const data = await response.json();
 
@@ -3827,6 +3854,7 @@ async function fetchAnomalousReportStats() {
             { itemType: 'proto', defaultDir: 'any', viewType: 'anomalies', rawItems: data.ip_protocols.map(x => x.name || x.protocol) }
         );
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching anomalous report stats:', err);
     }
 }
@@ -4056,13 +4084,10 @@ function renderConditions(viewType) {
                     applyFiltersFromForm();
                     state.pagination.offset = 0;
                     refreshData();
-                    fetchFlows();
-                    fetchStats();
                 } else {
                     applyAnomaliesFiltersFromForm();
                     state.anomaliesPagination.offset = 0;
                     fetchAnomalousReport();
-                    fetchAnomalousReportStats();
                 }
             }
         });
@@ -4078,13 +4103,10 @@ function renderConditions(viewType) {
                 applyFiltersFromForm();
                 state.pagination.offset = 0;
                 refreshData();
-                fetchFlows();
-                fetchStats();
             } else {
                 applyAnomaliesFiltersFromForm();
                 state.anomaliesPagination.offset = 0;
                 fetchAnomalousReport();
-                fetchAnomalousReportStats();
             }
         });
     });
@@ -4137,15 +4159,12 @@ function setupConditionBuilders() {
                 applyFiltersFromForm();
                 state.pagination.offset = 0;
                 refreshData();
-                fetchFlows();
-                fetchStats();
             } else {
                 state.anomaliesFilters.logic = logic;
                 renderConditions('anomalies');
                 applyAnomaliesFiltersFromForm();
                 state.anomaliesPagination.offset = 0;
                 fetchAnomalousReport();
-                fetchAnomalousReportStats();
             }
         });
     });
@@ -4262,14 +4281,11 @@ function applyDrillDownFilter(viewType, action, dir, val) {
         applyFiltersFromForm();
         state.pagination.offset = 0;
         refreshData();
-        fetchFlows();
-        fetchStats();
     } else if (viewType === 'anomalies') {
         addCondition('anomalies', field, val, 'custom');
         applyAnomaliesFiltersFromForm();
         state.anomaliesPagination.offset = 0;
         fetchAnomalousReport();
-        fetchAnomalousReportStats();
     }
 }
 

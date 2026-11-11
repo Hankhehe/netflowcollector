@@ -1,4 +1,5 @@
 import os
+import sys
 import sqlite3
 import json
 import socket
@@ -8,6 +9,7 @@ import ipaddress
 import time
 import hashlib
 import secrets
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
@@ -52,16 +54,37 @@ app = FastAPI(title="Netflow Collector Web UI")
 DB_PATH = os.getenv("SQLITE_DB_PATH", "flows.db")
 
 # ---------------- Authentication Utilities ----------------
+session_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+session_cache_lock = threading.Lock()
+SESSION_CACHE_TTL = 60.0  # 60 seconds in-memory cache
+
+def invalidate_session_cache(token: Optional[str] = None, user_id: Optional[int] = None):
+    with session_cache_lock:
+        if token is not None:
+            session_cache.pop(token, None)
+        elif user_id is not None:
+            to_remove = [t for t, (_, u) in session_cache.items() if u.get("id") == user_id]
+            for t in to_remove:
+                session_cache.pop(t, None)
+        else:
+            session_cache.clear()
+
 def hash_password(password: str, salt: str) -> str:
     """Hash password using PBKDF2 HMAC SHA-256."""
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
 
 def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
-    """Verify session token from SQLite. Returns user dict if valid and unexpired."""
+    """Verify session token from cache or SQLite. Returns user dict if valid and unexpired."""
     if not token:
         return None
+    now_mono = time.monotonic()
+    with session_cache_lock:
+        cached = session_cache.get(token)
+        if cached and (now_mono - cached[0]) < SESSION_CACHE_TTL:
+            return cached[1]
+
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         cur = conn.cursor()
         cur.execute("""
             SELECT s.token, s.user_id, s.username, s.role, s.expires_at, u.is_active, u.must_change_password
@@ -72,10 +95,12 @@ def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
         row = cur.fetchone()
         conn.close()
         if not row:
+            invalidate_session_cache(token=token)
             return None
         
         token_str, user_id, username, role, expires_at_str, is_active, must_change_password = row
         if not is_active:
+            invalidate_session_cache(token=token)
             return None
             
         expires_at = parse_tw_datetime(expires_at_str)
@@ -83,20 +108,26 @@ def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
             delete_session(token)
             return None
             
-        return {
+        user_dict = {
             "id": user_id,
             "username": username,
             "role": role,
             "must_change_password": bool(must_change_password)
         }
+        with session_cache_lock:
+            if len(session_cache) > 1000:
+                session_cache.clear()
+            session_cache[token] = (now_mono, user_dict)
+        return user_dict
     except Exception as e:
         print(f"[Auth] Error verifying session token: {e}")
         return None
 
 def delete_session(token: str):
     """Delete a session token from SQLite."""
+    invalidate_session_cache(token=token)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         cur = conn.cursor()
         cur.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
         conn.commit()
@@ -275,6 +306,17 @@ def get_db_connection():
 
 port_aliases_cache = {}
 ip_aliases_cache = {}
+resolved_cidr_cache: OrderedDict[str, Optional[str]] = OrderedDict()
+resolved_cidr_lock = threading.Lock()
+MAX_RESOLVED_CIDR_CACHE = 50000
+ip_aliases_total_count_cache: Optional[int] = None
+
+def _cache_resolved_ip(ip_str: str, alias: Optional[str]):
+    with resolved_cidr_lock:
+        resolved_cidr_cache[ip_str] = alias
+        resolved_cidr_cache.move_to_end(ip_str)
+        if len(resolved_cidr_cache) > MAX_RESOLVED_CIDR_CACHE:
+            resolved_cidr_cache.popitem(last=False)
 
 def ip_to_hex(ip_obj) -> str:
     if ip_obj.version == 4:
@@ -294,17 +336,21 @@ def load_port_aliases():
         print(f"[Startup Init] Error loading port aliases into cache: {e}")
 
 def load_ip_aliases():
-    global ip_aliases_cache
+    global ip_aliases_cache, ip_aliases_total_count_cache
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         # Only load exact IP matches into memory cache to save memory
         cur.execute("SELECT ip, name FROM ip_aliases WHERE ip NOT LIKE '%/%'")
         rows = cur.fetchall()
+        cur.execute("SELECT COUNT(*) FROM ip_aliases")
+        ip_aliases_total_count_cache = cur.fetchone()[0]
         conn.close()
         
         ip_aliases_cache = {row[0].strip(): row[1].strip() for row in rows}
-        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} exact IP aliases into cache.")
+        with resolved_cidr_lock:
+            resolved_cidr_cache.clear()
+        print(f"[Startup Init] Loaded {len(ip_aliases_cache)} exact IP aliases into cache (total rows: {ip_aliases_total_count_cache}).")
     except Exception as e:
         print(f"[Startup Init] Error loading IP aliases into cache: {e}")
 
@@ -408,26 +454,44 @@ def resolve_ip_alias(ip_str: str) -> Optional[str]:
     # 1. Exact match first
     if ip_str in ip_aliases_cache:
         return ip_aliases_cache[ip_str]
+
+    with resolved_cidr_lock:
+        if ip_str in resolved_cidr_cache:
+            resolved_cidr_cache.move_to_end(ip_str)
+            return resolved_cidr_cache[ip_str]
         
-    # 2. CIDR range match from SQLite
+    # 2. Fast O(log N) reverse B-Tree CIDR range match from SQLite
     try:
+        if "/" in ip_str:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM ip_aliases WHERE ip = ? LIMIT 1", (ip_str,))
+            row = cur.fetchone()
+            conn.close()
+            alias = row[0] if row else None
+            _cache_resolved_ip(ip_str, alias)
+            return alias
+
         ip_obj = ipaddress.ip_address(ip_str)
         ip_hex = ip_to_hex(ip_obj)
+        min_hex = "v4-00000000" if ip_obj.version == 4 else "v6-00000000000000000000000000000000"
         
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute("""
-            SELECT name FROM ip_aliases 
-            WHERE start_ip <= ? AND end_ip >= ? 
+            SELECT name FROM (
+                SELECT name, end_ip, prefix_len FROM ip_aliases
+                WHERE start_ip <= ? AND start_ip >= ?
+                ORDER BY start_ip DESC LIMIT 16
+            )
+            WHERE end_ip >= ?
             ORDER BY prefix_len DESC LIMIT 1
-        """, (ip_hex, ip_hex))
+        """, (ip_hex, min_hex, ip_hex))
         row = cur.fetchone()
         conn.close()
         
         alias = row[0] if row else None
-        if alias:
-            # Cache resolved IP for future O(1) lookups
-            ip_aliases_cache[ip_str] = alias
+        _cache_resolved_ip(ip_str, alias)
         return alias
     except Exception:
         pass
@@ -442,10 +506,27 @@ def resolve_ip_aliases_batch(ips_list: Iterable[str]) -> Dict[str, str]:
         if not ip:
             continue
         ip_clean = ip.strip()
+        ip_lower = ip_clean.lower()
+        if ip_lower == "internal":
+            results[ip_clean] = "Private IP"
+            continue
+        elif ip_lower == "external":
+            results[ip_clean] = "Public IP"
+            continue
+
         if ip_clean in ip_aliases_cache:
             results[ip_clean] = ip_aliases_cache[ip_clean]
-        else:
-            missing_ips.append(ip_clean)
+            continue
+
+        with resolved_cidr_lock:
+            if ip_clean in resolved_cidr_cache:
+                resolved_cidr_cache.move_to_end(ip_clean)
+                val = resolved_cidr_cache[ip_clean]
+                if val:
+                    results[ip_clean] = val
+                continue
+
+        missing_ips.append(ip_clean)
             
     if not missing_ips:
         return results
@@ -454,21 +535,35 @@ def resolve_ip_aliases_batch(ips_list: Iterable[str]) -> Dict[str, str]:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         
-        for ip in missing_ips:
+        for ip in set(missing_ips):
             try:
+                if "/" in ip:
+                    cur.execute("SELECT name FROM ip_aliases WHERE ip = ? LIMIT 1", (ip,))
+                    row = cur.fetchone()
+                    alias = row[0] if row else None
+                    _cache_resolved_ip(ip, alias)
+                    if alias:
+                        results[ip] = alias
+                    continue
+
                 ip_obj = ipaddress.ip_address(ip)
                 ip_hex = ip_to_hex(ip_obj)
+                min_hex = "v4-00000000" if ip_obj.version == 4 else "v6-00000000000000000000000000000000"
                 
                 cur.execute("""
-                    SELECT name FROM ip_aliases 
-                    WHERE start_ip <= ? AND end_ip >= ? 
+                    SELECT name FROM (
+                        SELECT name, end_ip, prefix_len FROM ip_aliases
+                        WHERE start_ip <= ? AND start_ip >= ?
+                        ORDER BY start_ip DESC LIMIT 16
+                    )
+                    WHERE end_ip >= ?
                     ORDER BY prefix_len DESC LIMIT 1
-                """, (ip_hex, ip_hex))
+                """, (ip_hex, min_hex, ip_hex))
                 row = cur.fetchone()
-                if row:
-                    alias = row[0]
+                alias = row[0] if row else None
+                _cache_resolved_ip(ip, alias)
+                if alias:
                     results[ip] = alias
-                    ip_aliases_cache[ip] = alias  # Cache it
             except Exception:
                 pass
                 
@@ -1036,6 +1131,7 @@ def auth_change_password(payload: ChangePasswordRequest, request: Request):
     """, (new_hash, new_salt, user["id"]))
     conn.commit()
     conn.close()
+    invalidate_session_cache(user_id=user["id"])
     
     return {"status": "success", "message": "密碼已成功修改！"}
 
@@ -1118,6 +1214,7 @@ def update_user(user_id: int, payload: UpdateUserRequest, request: Request):
         cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
     conn.close()
+    invalidate_session_cache(user_id=user_id)
     return {"status": "success", "message": "使用者資料更新成功。"}
 
 @app.post("/api/users/{user_id}/reset-password")
@@ -1140,6 +1237,7 @@ def reset_user_password(user_id: int, payload: ResetUserPasswordRequest, request
     cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+    invalidate_session_cache(user_id=user_id)
     return {"status": "success", "message": f"已重設使用者 '{user[1]}' 之密碼。"}
 
 @app.delete("/api/users/{user_id}")
@@ -1164,6 +1262,7 @@ def delete_user(user_id: int, request: Request):
     cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+    invalidate_session_cache(user_id=user_id)
     return {"status": "success", "message": f"使用者 '{user['username']}' 已成功刪除。"}
 
 # ---------------- Retention & Cleanup Settings API ----------------
@@ -1288,19 +1387,43 @@ def delete_collector_cidr(cidr_id: int):
     conn.close()
     return {"status": "success", "message": "已從收集器白名單移除該網段。"}
 
+exporters_cache: Tuple[float, List[str]] = (0.0, [])
+exporters_cache_lock = threading.Lock()
+ch_query_executor = ThreadPoolExecutor(max_workers=8)
+
+def _run_ch_query(sql: str, params: Optional[Dict[str, Any]] = None):
+    client = get_ch_client()
+    return client.query(sql, parameters=params or {})
+
 @app.get("/api/exporters")
 def get_exporters():
-    """Get a list of all distinct exporter IPs from both tables."""
+    """Get a list of all distinct exporter IPs from both tables (cached for 30s)."""
+    global exporters_cache
+    now_mono = time.monotonic()
+    with exporters_cache_lock:
+        if now_mono - exporters_cache[0] < 30.0 and exporters_cache[1]:
+            return exporters_cache[1]
     try:
         client = get_ch_client()
         result = client.query("""
             SELECT DISTINCT exporter FROM (
-                SELECT exporter FROM ipfix
+                SELECT DISTINCT exporter FROM ipfix WHERE ts >= now() - INTERVAL 7 DAY
                 UNION ALL
-                SELECT exporter FROM netflow9
+                SELECT DISTINCT exporter FROM netflow9 WHERE ts >= now() - INTERVAL 7 DAY
             ) WHERE exporter IS NOT NULL AND exporter != ''
         """)
         exporters = [row[0] for row in result.result_rows]
+        if not exporters:
+            result = client.query("""
+                SELECT DISTINCT exporter FROM (
+                    SELECT DISTINCT exporter FROM ipfix
+                    UNION ALL
+                    SELECT DISTINCT exporter FROM netflow9
+                ) WHERE exporter IS NOT NULL AND exporter != ''
+            """)
+            exporters = [row[0] for row in result.result_rows]
+        with exporters_cache_lock:
+            exporters_cache = (now_mono, exporters)
         return exporters
     except Exception as e:
         reset_ch_client()
@@ -1835,7 +1958,7 @@ def export_flows(
         # Execute data query
         result = client.query(sql, parameters=params)
 
-        # Collect unique IPs to resolve domains from DNS cache
+        # Collect unique IPs to resolve domains and aliases in batch
         ips_to_resolve = set()
         for row in result.result_rows:
             r = dict(zip(result.column_names, row))
@@ -1844,6 +1967,7 @@ def export_flows(
             if r.get("dst"):
                 ips_to_resolve.add(r["dst"])
         dns_map = get_dns_mappings(ips_to_resolve)
+        alias_map = resolve_ip_aliases_batch(ips_to_resolve)
 
         # CSV generator
         def csv_generator():
@@ -1907,9 +2031,9 @@ def export_flows(
                 
                 # Add domain names (IP alias takes priority over DNS cache resolved domain)
                 if "src" in r:
-                    csv_row.append(resolve_ip_alias(r["src"]) or dns_map.get(r["src"], ""))
+                    csv_row.append(alias_map.get(r["src"]) or dns_map.get(r["src"], ""))
                 if "dst" in r:
-                    csv_row.append(resolve_ip_alias(r["dst"]) or dns_map.get(r["dst"], ""))
+                    csv_row.append(alias_map.get(r["dst"]) or dns_map.get(r["dst"], ""))
                 
                 # Add port names
                 if "sport" in r:
@@ -2057,63 +2181,7 @@ def get_stats(
         else:
             combined_flows = f"SELECT exporter, src, dst, sport, dport, packets, octets, protocol, ts FROM ipfix WHERE 1=0"
 
-        # 1. Overall Totals
-        res = client.query(f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM ({combined_flows})", parameters=params)
-        totals = dict(zip(res.column_names, res.result_rows[0]))
-        total_flows = totals["total_flows"] or 0
-        total_packets = totals["total_packets"] or 0
-        total_bytes = totals["total_bytes"] or 0
-
-        # 2. Top Sources by bytes
-        res = client.query(f"""
-            SELECT src, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM ({combined_flows})
-            GROUP BY src
-            ORDER BY bytes DESC
-            LIMIT 10
-        """, parameters=params)
-        top_sources = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 3. Top Destinations by bytes
-        res = client.query(f"""
-            SELECT dst, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM ({combined_flows})
-            GROUP BY dst
-            ORDER BY bytes DESC
-            LIMIT 10
-        """, parameters=params)
-        top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 4. Top Exporters
-        res = client.query(f"""
-            SELECT exporter, SUM(octets) as bytes, COUNT() as flows
-            FROM ({combined_flows})
-            GROUP BY exporter
-            ORDER BY flows DESC
-            LIMIT 5
-        """, parameters=params)
-        top_exporters = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 5. Protocols share
-        res = client.query(f"""
-            SELECT protocol, COUNT() as count, SUM(octets) as bytes
-            FROM ({combined_flows})
-            GROUP BY protocol
-            ORDER BY count DESC
-        """, parameters=params)
-        raw_protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
-        protocols = []
-        for p in raw_protocols:
-            p_num = p["protocol"]
-            p_name = PROTO_NAME_MAP.get(p_num, f"OTHER ({p_num})" if p_num is not None else "N/A")
-            protocols.append({
-                "protocol": p_num,
-                "name": p_name,
-                "count": p["count"],
-                "bytes": p["bytes"] or 0
-            })
-
-        # 6. Traffic over time
+        # Determine time bin grouping function before firing concurrent queries
         if start_time and end_time:
             try:
                 from datetime import datetime as dt
@@ -2146,13 +2214,60 @@ def get_stats(
                 time_format = "%Y-%m-%d"
                 ch_group_fn = "toStartOfDay(ts + INTERVAL 8 HOUR)"
 
-        res = client.query(f"""
-            SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM ({combined_flows})
-            GROUP BY time_bin
-            ORDER BY time_bin ASC
-        """, parameters=params)
-        
+        # Execute all 8 aggregation queries concurrently across ClickHouse thread-local clients
+        q_totals = f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM ({combined_flows})"
+        q_top_src = f"SELECT src, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY src ORDER BY bytes DESC LIMIT 10"
+        q_top_dst = f"SELECT dst, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY dst ORDER BY bytes DESC LIMIT 10"
+        q_top_exp = f"SELECT exporter, SUM(octets) as bytes, COUNT() as flows FROM ({combined_flows}) GROUP BY exporter ORDER BY flows DESC LIMIT 5"
+        q_protos = f"SELECT protocol, COUNT() as count, SUM(octets) as bytes FROM ({combined_flows}) GROUP BY protocol ORDER BY count DESC"
+        q_time = f"SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY time_bin ORDER BY time_bin ASC"
+        q_sport = f"SELECT sport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) WHERE sport IS NOT NULL GROUP BY sport ORDER BY bytes DESC LIMIT 10"
+        q_dport = f"SELECT dport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) WHERE dport IS NOT NULL GROUP BY dport ORDER BY bytes DESC LIMIT 10"
+
+        f_totals = ch_query_executor.submit(_run_ch_query, q_totals, params)
+        f_top_src = ch_query_executor.submit(_run_ch_query, q_top_src, params)
+        f_top_dst = ch_query_executor.submit(_run_ch_query, q_top_dst, params)
+        f_top_exp = ch_query_executor.submit(_run_ch_query, q_top_exp, params)
+        f_protos = ch_query_executor.submit(_run_ch_query, q_protos, params)
+        f_time = ch_query_executor.submit(_run_ch_query, q_time, params)
+        f_sport = ch_query_executor.submit(_run_ch_query, q_sport, params)
+        f_dport = ch_query_executor.submit(_run_ch_query, q_dport, params)
+
+        # 1. Overall Totals
+        res = f_totals.result()
+        totals = dict(zip(res.column_names, res.result_rows[0]))
+        total_flows = totals["total_flows"] or 0
+        total_packets = totals["total_packets"] or 0
+        total_bytes = totals["total_bytes"] or 0
+
+        # 2. Top Sources by bytes
+        res = f_top_src.result()
+        top_sources = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 3. Top Destinations by bytes
+        res = f_top_dst.result()
+        top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 4. Top Exporters
+        res = f_top_exp.result()
+        top_exporters = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        # 5. Protocols share
+        res = f_protos.result()
+        raw_protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
+        protocols = []
+        for p in raw_protocols:
+            p_num = p["protocol"]
+            p_name = PROTO_NAME_MAP.get(p_num, f"OTHER ({p_num})" if p_num is not None else "N/A")
+            protocols.append({
+                "protocol": p_num,
+                "name": p_name,
+                "count": p["count"],
+                "bytes": p["bytes"] or 0
+            })
+
+        # 6. Traffic over time
+        res = f_time.result()
         traffic_over_time = []
         for r_row in res.result_rows:
             r = dict(zip(res.column_names, r_row))
@@ -2162,25 +2277,11 @@ def get_stats(
             traffic_over_time.append(r)
 
         # 7. Top Source Ports by bytes
-        res = client.query(f"""
-            SELECT sport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM ({combined_flows})
-            WHERE sport IS NOT NULL
-            GROUP BY sport
-            ORDER BY bytes DESC
-            LIMIT 10
-        """, parameters=params)
+        res = f_sport.result()
         top_source_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
         # 8. Top Destination Ports by bytes
-        res = client.query(f"""
-            SELECT dport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM ({combined_flows})
-            WHERE dport IS NOT NULL
-            GROUP BY dport
-            ORDER BY bytes DESC
-            LIMIT 10
-        """, parameters=params)
+        res = f_dport.result()
         top_destination_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
         # Collect unique IPs in stats
@@ -2298,6 +2399,7 @@ def get_ip_aliases(
     offset: int = Query(0, ge=0),
     q: Optional[str] = Query(None)
 ):
+    global ip_aliases_total_count_cache
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -2305,13 +2407,19 @@ def get_ip_aliases(
         
         where_clause = ""
         params = []
-        if q:
+        if q and q.strip():
             q_clean = f"%{q.strip()}%"
             where_clause = "WHERE ip LIKE ? OR name LIKE ?"
             params = [q_clean, q_clean]
-            
-        cur.execute(f"SELECT COUNT(*) FROM ip_aliases {where_clause}", params)
-        total_count = cur.fetchone()[0]
+            cur.execute(f"SELECT COUNT(*) FROM ip_aliases {where_clause}", params)
+            total_count = cur.fetchone()[0]
+        else:
+            if ip_aliases_total_count_cache is not None:
+                total_count = ip_aliases_total_count_cache
+            else:
+                cur.execute("SELECT COUNT(*) FROM ip_aliases")
+                total_count = cur.fetchone()[0]
+                ip_aliases_total_count_cache = total_count
         
         params.extend([limit, offset])
         cur.execute(f"SELECT ip, name FROM ip_aliases {where_clause} ORDER BY ip ASC LIMIT ? OFFSET ?", params)
@@ -2966,9 +3074,11 @@ def get_audit_rules():
         cur.execute("SELECT id, ip, port, flag, created_at FROM audit_rules ORDER BY id DESC")
         rules = [dict(row) for row in cur.fetchall()]
         conn.close()
+        rule_ips = {r["ip"] for r in rules if r.get("ip")}
+        alias_map = resolve_ip_aliases_batch(rule_ips)
         for rule in rules:
             ip = rule.get("ip")
-            rule["ip_alias"] = resolve_ip_alias(ip) if ip else ""
+            rule["ip_alias"] = alias_map.get(ip, "") if ip else ""
             port = rule.get("port")
             try:
                 rule["port_name"] = port_aliases_cache.get(int(port), "") if port and str(port).isdigit() else ""
@@ -3177,16 +3287,14 @@ def trigger_audit(payload: Optional[AuditRunRequest] = None):
 
 @app.get("/api/audit/status")
 def get_audit_status():
-    def to_utc8_str(utc_dt_str: str) -> str:
-        if not utc_dt_str or utc_dt_str == "Never":
+    def format_tw_str(dt_str: str) -> str:
+        if not dt_str or dt_str == "Never":
             return "Never"
         try:
-            utc_dt_str = utc_dt_str.replace('T', ' ')
-            dt = datetime.strptime(utc_dt_str, "%Y-%m-%d %H:%M:%S")
-            utc8_dt = dt + timedelta(hours=8)
-            return utc8_dt.strftime("%Y-%m-%d %H:%M:%S")
+            dt = parse_tw_datetime(dt_str)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
-            return utc_dt_str
+            return dt_str
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -3203,27 +3311,26 @@ def get_audit_status():
         
         conn.close()
         
-        last_run_utc8 = "Never"
-        next_run_utc8 = "Immediately"
+        last_run_tw = "Never"
+        next_run_tw = "Immediately"
         status = "none"
         records_matched = 0
         message = "No audit has run yet."
         
         if last_log:
-            last_run_utc8 = to_utc8_str(last_log["run_ts"])
+            last_run_tw = format_tw_str(last_log["run_ts"])
             status = last_log["status"]
             records_matched = last_log["records_matched"]
             message = last_log["message"]
             
         if last_success:
-            utc_str = last_success["run_ts"].replace('T', ' ')
-            dt = datetime.strptime(utc_str, "%Y-%m-%d %H:%M:%S")
+            dt = parse_tw_datetime(last_success["run_ts"])
             next_dt = dt + timedelta(hours=24)
-            next_run_utc8 = to_utc8_str(next_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            next_run_tw = next_dt.strftime("%Y-%m-%d %H:%M:%S")
             
         return {
-            "run_ts": last_run_utc8,
-            "next_run_ts": next_run_utc8,
+            "run_ts": last_run_tw,
+            "next_run_ts": next_run_tw,
             "status": status,
             "records_matched": records_matched,
             "message": message
@@ -3302,61 +3409,65 @@ def get_audit_matches_stats(
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
             
-        # 1. Total flows/packets/bytes
-        res = client.query(f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM matched_flows {where_sql}", parameters=params)
-        totals = dict(zip(res.column_names, res.result_rows[0]))
-        total_flows = totals["total_flows"] or 0
-        total_packets = totals["total_packets"] or 0
-        total_bytes = totals["total_bytes"] or 0
+        where_sport = f"{where_sql} AND sport IS NOT NULL" if where_sql else "WHERE sport IS NOT NULL"
+        where_dport = f"{where_sql} AND dport IS NOT NULL" if where_sql else "WHERE dport IS NOT NULL"
 
-        # 2. Top Sources
-        res = client.query(f"""
+        f_totals = ch_query_executor.submit(
+            _run_ch_query,
+            f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM matched_flows {where_sql}",
+            params
+        )
+        f_top_src = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT src, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
             FROM matched_flows
             {where_sql}
             GROUP BY src
             ORDER BY bytes DESC
             LIMIT 10
-        """, parameters=params)
-        top_sources = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 3. Top Destinations
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_top_dst = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT dst, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
             FROM matched_flows
             {where_sql}
             GROUP BY dst
             ORDER BY bytes DESC
             LIMIT 10
-        """, parameters=params)
-        top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 4. Top Source Ports
-        where_sport = f"{where_sql} AND sport IS NOT NULL" if where_sql else "WHERE sport IS NOT NULL"
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_top_sport = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT sport, SUM(octets) as bytes, COUNT() as flows
             FROM matched_flows
             {where_sport}
             GROUP BY sport
             ORDER BY bytes DESC
             LIMIT 10
-        """, parameters=params)
-        top_source_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 5. Top Destination Ports
-        where_dport = f"{where_sql} AND dport IS NOT NULL" if where_sql else "WHERE dport IS NOT NULL"
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_top_dport = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT dport, SUM(octets) as bytes, COUNT() as flows
             FROM matched_flows
             {where_dport}
             GROUP BY dport
             ORDER BY bytes DESC
             LIMIT 10
-        """, parameters=params)
-        top_destination_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 5b. Top Ports (Overall union)
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_top_ports = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT port, SUM(octets) as bytes, COUNT() as flows
             FROM (
                 SELECT sport as port, octets FROM matched_flows {where_sport}
@@ -3366,27 +3477,98 @@ def get_audit_matches_stats(
             GROUP BY port
             ORDER BY bytes DESC
             LIMIT 10
-        """, parameters=params)
-        top_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 6. Protocols Share
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_protocols = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT proto as name, COUNT() as count, SUM(octets) as bytes
             FROM matched_flows
             {where_sql}
             GROUP BY name
             ORDER BY count DESC
-        """, parameters=params)
-        protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
-
-        # 6b. IP Protocols Share (TCP, UDP, etc.)
-        res = client.query(f"""
+            """,
+            params
+        )
+        f_ip_protos = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
             SELECT protocol as name_num, COUNT() as count, SUM(octets) as bytes
             FROM matched_flows
             {where_sql}
             GROUP BY name_num
             ORDER BY count DESC
-        """, parameters=params)
+            """,
+            params
+        )
+        f_flags = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
+            SELECT match_flag as name, COUNT() as count, SUM(octets) as bytes
+            FROM matched_flows
+            {where_sql}
+            GROUP BY name
+            ORDER BY count DESC
+            """,
+            params
+        )
+        f_range = ch_query_executor.submit(
+            _run_ch_query,
+            f"SELECT min(ts), max(ts) FROM matched_flows {where_sql}",
+            params
+        )
+
+        # 8. Traffic over time (launch immediately once range finishes)
+        range_res = f_range.result()
+        min_ts, max_ts = range_res.result_rows[0]
+        
+        time_format = "%Y-%m-%d"
+        ch_group_fn = "toStartOfDay(ts + INTERVAL 8 HOUR)"
+        if min_ts and max_ts:
+            diff_secs = (max_ts - min_ts).total_seconds()
+            if diff_secs < 172800: # < 48 hours
+                time_format = "%Y-%m-%d %H:00"
+                ch_group_fn = "toStartOfHour(ts + INTERVAL 8 HOUR)"
+                
+        f_time = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
+            SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            GROUP BY time_bin
+            ORDER BY time_bin ASC
+            """,
+            params
+        )
+
+        # Collect parallel results
+        res = f_totals.result()
+        totals = dict(zip(res.column_names, res.result_rows[0]))
+        total_flows = totals["total_flows"] or 0
+        total_packets = totals["total_packets"] or 0
+        total_bytes = totals["total_bytes"] or 0
+
+        res = f_top_src.result()
+        top_sources = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_top_dst.result()
+        top_destinations = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_top_sport.result()
+        top_source_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_top_dport.result()
+        top_destination_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_top_ports.result()
+        top_ports = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_protocols.result()
+        protocols = [dict(zip(res.column_names, r)) for r in res.result_rows]
+
+        res = f_ip_protos.result()
         ip_protocols = []
         for r in res.result_rows:
             p_num = r[0]
@@ -3398,36 +3580,10 @@ def get_audit_matches_stats(
                 "bytes": r[2]
             })
 
-        # 7. Flags Share
-        res = client.query(f"""
-            SELECT match_flag as name, COUNT() as count, SUM(octets) as bytes
-            FROM matched_flows
-            {where_sql}
-            GROUP BY name
-            ORDER BY count DESC
-        """, parameters=params)
+        res = f_flags.result()
         flags = [dict(zip(res.column_names, r)) for r in res.result_rows]
 
-        # 8. Traffic over time
-        range_res = client.query(f"SELECT min(ts), max(ts) FROM matched_flows {where_sql}", parameters=params)
-        min_ts, max_ts = range_res.result_rows[0]
-        
-        time_format = "%Y-%m-%d"
-        ch_group_fn = "toStartOfDay(ts + INTERVAL 8 HOUR)"
-        if min_ts and max_ts:
-            diff_secs = (max_ts - min_ts).total_seconds()
-            if diff_secs < 172800: # < 48 hours
-                time_format = "%Y-%m-%d %H:00"
-                ch_group_fn = "toStartOfHour(ts + INTERVAL 8 HOUR)"
-                
-        res = client.query(f"""
-            SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows
-            FROM matched_flows
-            {where_sql}
-            GROUP BY time_bin
-            ORDER BY time_bin ASC
-        """, parameters=params)
-        
+        res = f_time.result()
         traffic_over_time = []
         for r_row in res.result_rows:
             r = dict(zip(res.column_names, r_row))
@@ -3600,6 +3756,8 @@ def get_audit_matches(
                 ips_to_resolve.add(r["dst"])
             if r.get("exporter"):
                 ips_to_resolve.add(r["exporter"])
+            if r.get("rule_ip"):
+                ips_to_resolve.add(r["rule_ip"])
                 
         # Get DNS and IP Aliases mappings in batch
         dns_map = get_dns_mappings(ips_to_resolve)
@@ -3614,7 +3772,7 @@ def get_audit_matches(
             r["sport_name"] = port_aliases_cache.get(r.get("sport"), "") if r.get("sport") is not None else ""
             r["dport_name"] = port_aliases_cache.get(r.get("dport"), "") if r.get("dport") is not None else ""
             rule_ip = r.get("rule_ip")
-            r["rule_ip_alias"] = resolve_ip_alias(rule_ip) if rule_ip else ""
+            r["rule_ip_alias"] = alias_map.get(rule_ip, "") if rule_ip else ""
             if r.get("protocol") is not None:
                 r["proto_name"] = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})")
             else:
@@ -3738,7 +3896,7 @@ def export_audit_matches(
         data_result = client.query(query, parameters=params)
         column_names = data_result.column_names
         
-        # Collect unique IPs to resolve domains from DNS cache
+        # Collect unique IPs to resolve domains and aliases in batch
         ips_to_resolve = set()
         for row in data_result.result_rows:
             r = dict(zip(column_names, row))
@@ -3748,7 +3906,10 @@ def export_audit_matches(
                 ips_to_resolve.add(r["dst"])
             if r.get("exporter"):
                 ips_to_resolve.add(r["exporter"])
+            if r.get("rule_ip"):
+                ips_to_resolve.add(r["rule_ip"])
         dns_map = get_dns_mappings(ips_to_resolve)
+        alias_map = resolve_ip_aliases_batch(ips_to_resolve)
         
         # CSV generator
         def csv_generator():
@@ -3780,13 +3941,13 @@ def export_audit_matches(
                 
                 # Collector IP and alias
                 exporter_ip = r.get("exporter") or ""
-                exporter_alias = resolve_ip_alias(exporter_ip) or dns_map.get(exporter_ip, "")
+                exporter_alias = alias_map.get(exporter_ip) or dns_map.get(exporter_ip, "")
 
                 # DNS and Aliases resolution
                 src_ip = r["src"]
                 dst_ip = r["dst"]
-                src_domain = resolve_ip_alias(src_ip) or dns_map.get(src_ip, "")
-                dst_domain = resolve_ip_alias(dst_ip) or dns_map.get(dst_ip, "")
+                src_domain = alias_map.get(src_ip) or dns_map.get(src_ip, "")
+                dst_domain = alias_map.get(dst_ip) or dns_map.get(dst_ip, "")
                 
                 sport_val = r["sport"]
                 dport_val = r["dport"]
@@ -3794,7 +3955,9 @@ def export_audit_matches(
                 dport_name = port_aliases_cache.get(dport_val, "")
                 
                 p_name = PROTO_NAME_MAP.get(r["protocol"], f"UNKNOWN ({r['protocol']})" if r["protocol"] is not None else "N/A")
-                rule_ip_val = f"{r['rule_ip']} ({resolve_ip_alias(r['rule_ip'])})" if r['rule_ip'] and resolve_ip_alias(r['rule_ip']) else (r['rule_ip'] or "(任意)")
+                rule_ip = r["rule_ip"]
+                rule_ip_alias = alias_map.get(rule_ip, "") if rule_ip else ""
+                rule_ip_val = f"{rule_ip} ({rule_ip_alias})" if rule_ip and rule_ip_alias else (rule_ip or "(任意)")
                 row_data = [
                     f_ts, flag_val, exporter_ip, exporter_alias, m_ts, rule_ip_val, r["rule_port"] or "(任意)",
                     src_ip, src_domain, sport_val, sport_name,

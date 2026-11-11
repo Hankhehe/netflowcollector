@@ -10,11 +10,21 @@ import threading
 import time
 import uuid
 import ipaddress
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Dict, Tuple, List, Any
 import clickhouse_connect
 
+TW_TZ = ZoneInfo("Asia/Taipei")
+
+def now_tw_str() -> str:
+    return datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
 # ---------------- ClickHouse Background Writer ----------------
 class ClickHouseWriter:
+    MAX_BATCH_SIZE = 20000
+    MAX_BUFFER_SIZE = 200000
+
     def __init__(self, q: queue.Queue):
         self.q = q
         self.client = None
@@ -109,20 +119,24 @@ class ClickHouseWriter:
                     time.sleep(5)
                     continue
 
-            # Drain memory queue
+            # Drain memory queue with batch cap to prevent memory spikes
             items = []
-            while not self.q.empty():
+            while not self.q.empty() and len(items) < self.MAX_BATCH_SIZE:
                 try:
                     items.append(self.q.get_nowait())
                 except queue.Empty:
                     break
 
             if not items and not self.buffer:
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
 
             # Merge any previously buffered failed items with new items
             all_items = self.buffer + items
+            if len(all_items) > self.MAX_BUFFER_SIZE:
+                dropped = len(all_items) - self.MAX_BUFFER_SIZE
+                print(f"[ClickHouseWriter] Warning: buffer exceeded {self.MAX_BUFFER_SIZE}, dropping {dropped} oldest records.", file=sys.stderr)
+                all_items = all_items[-self.MAX_BUFFER_SIZE:]
             self.buffer = []
 
             # Separate items by table type
@@ -135,13 +149,16 @@ class ClickHouseWriter:
                 elif table == "netflow9":
                     netflow9_raw.append(item)
 
+            batch_ts_ms = int(time.time() * 1000)
+            batch_uid = uuid.uuid4().hex[:6]
+
             # Insert IPFIX batch
             ipfix_success = True
             if ipfix_raw:
                 try:
                     ipfix_data = []
-                    for table, payload in ipfix_raw:
-                        flow_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+                    for idx, (table, payload) in enumerate(ipfix_raw):
+                        flow_id = f"{batch_ts_ms}-{batch_uid}-{idx}"
                         sport = int(payload.get("sport") or 0)
                         dport = int(payload.get("dport") or 0)
                         if sport < 0 or sport > 65535: sport = 0
@@ -173,8 +190,8 @@ class ClickHouseWriter:
             if netflow9_raw:
                 try:
                     nf9_data = []
-                    for table, payload in netflow9_raw:
-                        flow_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+                    for idx, (table, payload) in enumerate(netflow9_raw):
+                        flow_id = f"{batch_ts_ms}-{batch_uid}-n{idx}"
                         sport = int(payload.get("sport") or 0)
                         dport = int(payload.get("dport") or 0)
                         if sport < 0 or sport > 65535: sport = 0
@@ -206,16 +223,48 @@ class ClickHouseWriter:
                 self.client = None
                 print("[ClickHouseWriter] Resetting client connection due to failure. Retrying in 5 seconds...", file=sys.stderr)
                 time.sleep(5)
-            else:
-                time.sleep(1)
+            elif self.q.qsize() < 1000:
+                time.sleep(0.5)
 
 # ---------------- Common helpers ----------------
 def ip4(b: bytes) -> str:
-    return ".".join(str(x) for x in b)
+    return f"{b[0]}.{b[1]}.{b[2]}.{b[3]}"
 
 def try_ip(v: bytes, l: int) -> str:
-    if l == 4 and len(v) == 4: return ip4(v)
+    if l == 4 and len(v) == 4:
+        return f"{v[0]}.{v[1]}.{v[2]}.{v[3]}"
+    if l == 16 and len(v) == 16:
+        try:
+            return str(ipaddress.IPv6Address(v))
+        except Exception:
+            return v.hex()
     return v.hex()
+
+def compile_template_struct(field_specs: List[Tuple[str, int]]):
+    """Compile a list of (field_name, field_len) into a fast struct.Struct and decode plan."""
+    fmt_parts = ["!"]
+    decoders = []
+    for name, flen in field_specs:
+        if name in ("src", "dst"):
+            fmt_parts.append(f"{flen}s")
+            decoders.append((name, "ip", flen))
+        elif flen == 1:
+            fmt_parts.append("B")
+            decoders.append((name, "int", 1))
+        elif flen == 2:
+            fmt_parts.append("H")
+            decoders.append((name, "int", 2))
+        elif flen == 4:
+            fmt_parts.append("I")
+            decoders.append((name, "int", 4))
+        elif flen == 8:
+            fmt_parts.append("Q")
+            decoders.append((name, "int", 8))
+        else:
+            fmt_parts.append(f"{flen}s")
+            decoders.append((name, "hex", flen))
+    compiled_struct = struct.Struct("".join(fmt_parts))
+    return compiled_struct, decoders
 
 # ---------------- NetFlow v9 ----------------
 NFV9_FIELDS = {
@@ -288,8 +337,9 @@ class NetFlowV9Collector:
         self.port = port
         self.q = q
         self.sock = None
-        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int]]]] = {}
+        self.templates: Dict[Tuple[str,int], Dict[int, Any]] = {}
         self.allowed_cidrs = get_db_allowed_cidrs()
+        self.cidr_cache: Dict[str, bool] = {}
         self.bind_socket()
 
     def bind_socket(self):
@@ -300,6 +350,10 @@ class NetFlowV9Collector:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+            except Exception:
+                pass
             s.settimeout(2.0)
             s.bind((self.host, self.port))
             self.sock = s
@@ -315,6 +369,23 @@ class NetFlowV9Collector:
 
     def update_allowed_cidrs(self, new_cidrs):
         self.allowed_cidrs = new_cidrs
+        self.cidr_cache.clear()
+
+    def is_ip_allowed(self, ip: str) -> bool:
+        if not self.allowed_cidrs:
+            return True
+        allowed = self.cidr_cache.get(ip)
+        if allowed is not None:
+            return allowed
+        try:
+            addr = ipaddress.ip_address(ip)
+            allowed = any(addr in net for net in self.allowed_cidrs)
+        except Exception:
+            allowed = False
+        if len(self.cidr_cache) > 4096:
+            self.cidr_cache.clear()
+        self.cidr_cache[ip] = allowed
+        return allowed
 
     def run(self):
         while True:
@@ -325,13 +396,8 @@ class NetFlowV9Collector:
                     continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
-                if self.allowed_cidrs:
-                    try:
-                        addr = ipaddress.ip_address(ip)
-                        if not any(addr in net for net in self.allowed_cidrs):
-                            continue
-                    except Exception:
-                        continue
+                if not self.is_ip_allowed(ip):
+                    continue
                 self.handle_packet(ip, data)
             except socket.timeout:
                 continue
@@ -356,25 +422,30 @@ class NetFlowV9Collector:
                 while p + 4 <= len(body):
                     template_id, field_count = struct.unpack("!HH", body[p:p+4])
                     p += 4
-                    fields = []
+                    field_specs = []
                     for _ in range(field_count):
                         if p + 4 > len(body): break
                         f_type, f_len = struct.unpack("!HH", body[p:p+4])
                         p += 4
-                        fields.append((f_type, f_len))
-                    self.templates.setdefault(key, {})[template_id] = fields
+                        name, _ = NFV9_FIELDS.get(f_type, (f"f{f_type}", None))
+                        field_specs.append((name, f_len))
+                    if field_specs:
+                        self.templates.setdefault(key, {})[template_id] = compile_template_struct(field_specs)
             elif flowset_id == 1:
                 # Options Template
                 continue
             else:
                 # Data FlowSet
-                tmap = self.templates.get(key, {}).get(flowset_id)
-                if not tmap:
+                compiled = self.templates.get(key, {}).get(flowset_id)
+                if not compiled:
+                    continue
+                c_struct, decoders = compiled
+                rec_len = c_struct.size
+                if rec_len <= 0:
                     continue
                 p = 0
-                rec_len = sum(fl for _, fl in tmap)
                 while p + rec_len <= len(body):
-                    rec = body[p:p+rec_len]
+                    vals = c_struct.unpack_from(body, p)
                     p += rec_len
                     out: Dict[str, Any] = {
                         "exporter": exporter_ip,
@@ -384,19 +455,18 @@ class NetFlowV9Collector:
                         "first_switched": None,
                         "last_switched": None,
                     }
-                    cursor = 0
-                    for f_type, f_len in tmap:
-                        val = rec[cursor:cursor+f_len]
-                        cursor += f_len
-                        name, _ = NFV9_FIELDS.get(f_type, (f"f{f_type}", None))
-                        if name in ("src","dst"):
-                            out[name] = try_ip(val, f_len)
-                        elif f_len in (1,2,4,8):
-                            out[name] = int.from_bytes(val, "big")
+                    for (name, dtype, flen), val in zip(decoders, vals):
+                        if dtype == "int":
+                            out[name] = val
+                        elif dtype == "ip":
+                            out[name] = try_ip(val, flen)
                         else:
                             out[name] = val.hex()
                     normalized = self._normalize(out)
-                    self.q.put(("netflow9", normalized))
+                    try:
+                        self.q.put_nowait(("netflow9", normalized))
+                    except queue.Full:
+                        pass
 
     def _normalize(self, d: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -438,8 +508,9 @@ class IPFIXCollector:
         self.port = port
         self.q = q
         self.sock = None
-        self.templates: Dict[Tuple[str,int], Dict[int, List[Tuple[int,int,int]]]] = {}
+        self.templates: Dict[Tuple[str,int], Dict[int, Any]] = {}
         self.allowed_cidrs = get_db_allowed_cidrs()
+        self.cidr_cache: Dict[str, bool] = {}
         self.bind_socket()
 
     def bind_socket(self):
@@ -450,6 +521,10 @@ class IPFIXCollector:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+            except Exception:
+                pass
             s.settimeout(2.0)
             s.bind((self.host, self.port))
             self.sock = s
@@ -465,6 +540,23 @@ class IPFIXCollector:
 
     def update_allowed_cidrs(self, new_cidrs):
         self.allowed_cidrs = new_cidrs
+        self.cidr_cache.clear()
+
+    def is_ip_allowed(self, ip: str) -> bool:
+        if not self.allowed_cidrs:
+            return True
+        allowed = self.cidr_cache.get(ip)
+        if allowed is not None:
+            return allowed
+        try:
+            addr = ipaddress.ip_address(ip)
+            allowed = any(addr in net for net in self.allowed_cidrs)
+        except Exception:
+            allowed = False
+        if len(self.cidr_cache) > 4096:
+            self.cidr_cache.clear()
+        self.cidr_cache[ip] = allowed
+        return allowed
 
     def run(self):
         while True:
@@ -475,13 +567,8 @@ class IPFIXCollector:
                     continue
             try:
                 data, (ip, _port) = self.sock.recvfrom(65535)
-                if self.allowed_cidrs:
-                    try:
-                        addr = ipaddress.ip_address(ip)
-                        if not any(addr in net for net in self.allowed_cidrs):
-                            continue
-                    except Exception:
-                        continue
+                if not self.is_ip_allowed(ip):
+                    continue
                 self.handle_packet(ip, data)
             except socket.timeout:
                 continue
@@ -507,7 +594,7 @@ class IPFIXCollector:
                 while p + 4 <= len(body):
                     template_id, field_count = struct.unpack("!HH", body[p:p+4])
                     p += 4
-                    fields = []
+                    field_specs = []
                     for _ in range(field_count):
                         if p + 4 > len(body): break
                         ie, flen = struct.unpack("!HH", body[p:p+4])
@@ -518,19 +605,22 @@ class IPFIXCollector:
                             if p + 4 > len(body): break
                             ent = struct.unpack("!I", body[p:p+4])[0]
                             p += 4
-                        fields.append((ie, flen, ent))
-                    self.templates.setdefault(key, {})[template_id] = fields
+                        name, _ = IPFIX_IE.get(ie, (f"ie{ie}_e{ent}", None))
+                        field_specs.append((name, flen))
+                    if field_specs:
+                        self.templates.setdefault(key, {})[template_id] = compile_template_struct(field_specs)
             elif set_id == 3:
                 # Options Template
                 continue
             elif set_id >= 256:
-                tmap = self.templates.get(key, {}).get(set_id)
-                if not tmap:
+                compiled = self.templates.get(key, {}).get(set_id)
+                if not compiled:
                     continue
-                rec_len = sum(flen for _, flen, _ in tmap)
+                c_struct, decoders = compiled
+                rec_len = c_struct.size
                 p = 0
                 while rec_len and p + rec_len <= len(body):
-                    rec = body[p:p+rec_len]
+                    vals = c_struct.unpack_from(body, p)
                     p += rec_len
                     out: Dict[str, Any] = {
                         "exporter": exporter_ip,
@@ -539,15 +629,11 @@ class IPFIXCollector:
                         "exportTime": export_time,
                         "seq": seq,
                     }
-                    cursor = 0
-                    for ie, flen, ent in tmap:
-                        val = rec[cursor:cursor+flen]
-                        cursor += flen
-                        name, _ = IPFIX_IE.get(ie, (f"ie{ie}_e{ent}", None))
-                        if name in ("src","dst"):
+                    for (name, dtype, flen), val in zip(decoders, vals):
+                        if dtype == "int":
+                            out[name] = val
+                        elif dtype == "ip":
                             out[name] = try_ip(val, flen)
-                        elif flen in (1,2,4,8):
-                            out[name] = int.from_bytes(val, "big")
                         else:
                             out[name] = val.hex()
                     
@@ -566,7 +652,10 @@ class IPFIXCollector:
                         "first_switched": out.get("flowStartMilliseconds",""),
                         "last_switched": out.get("flowEndMilliseconds",""),
                     }
-                    self.q.put(("ipfix", norm))
+                    try:
+                        self.q.put_nowait(("ipfix", norm))
+                    except queue.Full:
+                        pass
 
 def monitor_ports(nf_collector, ipfix_collector):
     last_cidrs_str = None
@@ -604,7 +693,7 @@ def main():
     nf_port = args.nf_port if args.nf_port is not None else env_nf
     ipfix_port = args.ipfix_port if args.ipfix_port is not None else env_ipfix
 
-    q = queue.Queue()
+    q = queue.Queue(maxsize=200000)
 
     nf = NetFlowV9Collector(args.bind, nf_port, q)
     ipf = IPFIXCollector(args.bind, ipfix_port, q)
