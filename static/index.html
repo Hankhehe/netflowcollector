@@ -359,59 +359,17 @@
                         </div>
                     </div>
 
-                    <!-- Top Sources Card -->
+                    <!-- 1. Top IP Aliases -->
                     <div class="card">
                         <div class="card-header">
-                            <h3><i data-lucide="arrow-up-right" class="icon-sm"></i> 前十大來源 IP (Top Sources)</h3>
+                            <h3><i data-lucide="tag" class="icon-sm"></i> 前十大 IP 別名</h3>
                         </div>
                         <div class="card-body chart-container">
-                            <canvas id="chart-top-sources"></canvas>
+                            <canvas id="chart-top-aliases"></canvas>
                         </div>
                     </div>
 
-                    <!-- Top Destinations Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i data-lucide="arrow-down-left" class="icon-sm"></i> 前十大目的 IP (Top Destinations)</h3>
-                        </div>
-                        <div class="card-body chart-container">
-                            <canvas id="chart-top-destinations"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Top Source Ports Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大來源 Port</h3>
-                        </div>
-                        <div class="card-body chart-container">
-                            <canvas id="chart-top-src-ports"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Top Destination Ports Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大目的 Port</h3>
-                        </div>
-                        <div class="card-body chart-container">
-                            <canvas id="chart-top-dst-ports"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Protocols distribution -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i data-lucide="pie-chart" class="icon-sm"></i> 通訊協定分佈</h3>
-                        </div>
-                        <div class="card-body chart-container flex-center">
-                            <div class="doughnut-wrapper">
-                                <canvas id="chart-protocols"></canvas>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Top Exporters -->
+                    <!-- 2. Top Exporters -->
                     <div class="card">
                         <div class="card-header">
                             <h3><i data-lucide="activity" class="icon-sm"></i> 活躍 Exporter 分佈</h3>
@@ -422,6 +380,46 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- 3. Top Source Ports Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大來源 Port</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-src-ports"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 4. Top Destination Ports Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="hash" class="icon-sm"></i> 前十大目的 Port</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-dst-ports"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 5. Top Sources Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="arrow-up-right" class="icon-sm"></i> 前十大來源 IP (Top Sources)</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-sources"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 6. Top Destinations Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i data-lucide="arrow-down-left" class="icon-sm"></i> 前十大目的 IP (Top Destinations)</h3>
+                        </div>
+                        <div class="card-body chart-container">
+                            <canvas id="chart-top-destinations"></canvas>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -429,33 +427,20 @@
             <section id="view-anomalies" class="dashboard-view active" style="padding: 20px;">
                 <!-- Anomalies Analytics Charts -->
                 <div class="analytics-grid" id="anomalies-charts-grid">
-                    <!-- Top Sources Card -->
+                    <!-- 1. Top Anomalous IP Aliases Card -->
                     <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
-                                <i data-lucide="arrow-up-right" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
-                                <span>前十大異常來源 IP</span>
+                                <i data-lucide="tag" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
+                                <span>前十大異常 IP 別名</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
-                            <canvas id="chart-anomalies-sources"></canvas>
+                            <canvas id="chart-anomalies-aliases"></canvas>
                         </div>
                     </div>
 
-                    <!-- Top Destinations Card -->
-                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
-                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
-                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
-                                <i data-lucide="arrow-down-left" style="color: var(--color-success); width: 20px; height: 20px;"></i>
-                                <span>前十大異常目的 IP</span>
-                            </h3>
-                        </div>
-                        <div class="card-body chart-container" style="padding: 24px;">
-                            <canvas id="chart-anomalies-destinations"></canvas>
-                        </div>
-                    </div>
-
-                    <!-- Top Ports Card -->
+                    <!-- 2. Top Ports Card -->
                     <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
@@ -468,16 +453,29 @@
                         </div>
                     </div>
 
-                    <!-- IP Protocols Card -->
+                    <!-- 3. Top Sources Card -->
                     <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
                             <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
-                                <i data-lucide="activity" style="color: var(--color-success); width: 20px; height: 20px;"></i>
-                                <span>前十大異常協定</span>
+                                <i data-lucide="arrow-up-right" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
+                                <span>前十大異常來源 IP</span>
                             </h3>
                         </div>
                         <div class="card-body chart-container" style="padding: 24px;">
-                            <canvas id="chart-anomalies-protocols"></canvas>
+                            <canvas id="chart-anomalies-sources"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 4. Top Destinations Card -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); display: flex; flex-direction: column; margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-primary);">
+                                <i data-lucide="arrow-down-left" style="color: var(--color-success); width: 20px; height: 20px;"></i>
+                                <span>前十大異常目的 IP</span>
+                            </h3>
+                        </div>
+                        <div class="card-body chart-container" style="padding: 24px;">
+                            <canvas id="chart-anomalies-destinations"></canvas>
                         </div>
                     </div>
                 </div>
@@ -1579,6 +1577,6 @@
     <div id="chart-context-menu" class="chart-context-menu" style="display: none;"></div>
 
     <!-- Custom Script -->
-    <script src="app.js"></script>
+    <script src="app.js?v=20261112c"></script>
 </body>
 </html>

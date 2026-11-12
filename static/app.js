@@ -790,6 +790,7 @@ function setupEventListeners() {
     if (els.btnApplyAnomaliesSearch) {
         els.btnApplyAnomaliesSearch.addEventListener('click', () => {
             applyAnomaliesFiltersFromForm();
+            renderConditions('anomalies');
             state.anomaliesPagination.offset = 0;
             fetchAnomalousReport();
         });
@@ -986,6 +987,7 @@ function setupEventListeners() {
     els.filterForm.addEventListener('submit', (e) => {
         e.preventDefault();
         applyFiltersFromForm();
+        renderConditions('flow');
         state.pagination.offset = 0;
         refreshData();
     });
@@ -1356,7 +1358,12 @@ function applyFiltersFromForm() {
                 });
             }
         });
-        state.filters.conditions = conds;
+        if (!state.filters.conditions) {
+            state.filters.conditions = conds;
+        } else {
+            state.filters.conditions.length = 0;
+            state.filters.conditions.push(...conds);
+        }
     }
 }
 
@@ -1388,7 +1395,12 @@ function applyAnomaliesFiltersFromForm() {
                 });
             }
         });
-        state.anomaliesFilters.conditions = conds;
+        if (!state.anomaliesFilters.conditions) {
+            state.anomaliesFilters.conditions = conds;
+        } else {
+            state.anomaliesFilters.conditions.length = 0;
+            state.anomaliesFilters.conditions.push(...conds);
+        }
     }
 }
 
@@ -1785,6 +1797,13 @@ function formatChartIPLabel(ip, domain) {
     return `${ip} (${displayDomain})`;
 }
 
+// Helper to format Alias labels in charts (truncate long names to keep chart heights consistent)
+function formatChartAliasLabel(name) {
+    if (!name) return '';
+    const maxLen = 18;
+    return name.length > maxLen ? name.substring(0, maxLen) + '...' : name;
+}
+
 // Fetch stats and render analytics charts
 async function fetchStats() {
     const params = new URLSearchParams({
@@ -1856,11 +1875,19 @@ async function fetchStats() {
             data.top_destination_ports.map(x => x.bytes),
             { itemType: 'port', defaultDir: 'dst', viewType: 'general', rawItems: data.top_destination_ports.map(x => x.dport) }
         );
-        renderDoughnutChart(
-            'chart-protocols', 
-            data.protocols.map(x => x.name), 
-            data.protocols.map(x => x.count),
-            { itemType: 'proto', defaultDir: 'any', viewType: 'general', rawItems: data.protocols.map(x => x.name) }
+        const topAliases = data.top_aliases || [];
+        renderBarChart(
+            'chart-top-aliases',
+            '前十大 IP 別名',
+            topAliases.map(x => formatChartAliasLabel(x.name)),
+            topAliases.map(x => x.bytes),
+            { 
+                itemType: 'alias', 
+                defaultDir: 'any', 
+                viewType: 'general', 
+                rawItems: topAliases.map(x => x.name),
+                flowCounts: topAliases.map(x => x.flows)
+            }
         );
         renderDoughnutChart('chart-exporters', data.top_exporters.map(x => x.exporter), data.top_exporters.map(x => x.flows));
         
@@ -2023,8 +2050,21 @@ function renderBarChart(canvasId, title, labels, data, drillMeta) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
+                        title: function(context) {
+                            if (!context || !context.length) return '';
+                            const meta = context[0].chart.data.datasets[0].drillMeta;
+                            if (meta && meta.itemType === 'alias' && meta.rawItems && meta.rawItems[context[0].dataIndex] !== undefined) {
+                                return meta.rawItems[context[0].dataIndex];
+                            }
+                            return context[0].label;
+                        },
                         label: function(context) {
-                            return '傳輸量: ' + formatBytes(context.parsed.y);
+                            let label = '傳輸量: ' + formatBytes(context.parsed.y);
+                            const meta = context.chart.data.datasets[0].drillMeta;
+                            if (meta && meta.flowCounts && meta.flowCounts[context.dataIndex] !== undefined) {
+                                label += ` (${formatNumber(meta.flowCounts[context.dataIndex])} flows)`;
+                            }
+                            return label;
                         }
                     }
                 }
@@ -2032,7 +2072,11 @@ function renderBarChart(canvasId, title, labels, data, drillMeta) {
             scales: {
                 x: {
                     grid: { display: false },
-                    ticks: { color: '#9ca3af' }
+                    ticks: {
+                        color: '#9ca3af',
+                        maxRotation: 45,
+                        minRotation: 0
+                    }
                 },
                 y: {
                     grid: { color: 'rgba(255,255,255,0.05)' },
@@ -3843,15 +3887,22 @@ async function fetchAnomalousReportStats() {
             { itemType: 'port', defaultDir: 'any', viewType: 'anomalies', rawItems: data.top_ports.map(x => x.port) }
         );
 
-        // Render Top Protocols chart
+        // Render Top Anomalous IP Aliases chart
+        const topAnomaliesAliases = data.top_aliases || [];
         renderAnomaliesBarChart(
-            'chart-anomalies-protocols',
-            data.ip_protocols.map(x => x.name),
-            data.ip_protocols.map(x => x.bytes),
-            '協定流量 (Bytes)',
+            'chart-anomalies-aliases',
+            topAnomaliesAliases.map(x => formatChartAliasLabel(x.name)),
+            topAnomaliesAliases.map(x => x.bytes),
+            '別名流量 (Bytes)',
             'rgba(236, 72, 153, 0.7)',
             'rgba(236, 72, 153, 1)',
-            { itemType: 'proto', defaultDir: 'any', viewType: 'anomalies', rawItems: data.ip_protocols.map(x => x.name || x.protocol) }
+            { 
+                itemType: 'alias', 
+                defaultDir: 'any', 
+                viewType: 'anomalies', 
+                rawItems: topAnomaliesAliases.map(x => x.name),
+                flowCounts: topAnomaliesAliases.map(x => x.flows)
+            }
         );
     } catch (err) {
         if (err.name === 'AbortError') return;
@@ -3911,8 +3962,21 @@ function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderC
                     borderColor: '#374151',
                     borderWidth: 1,
                     callbacks: {
+                        title: function(context) {
+                            if (!context || !context.length) return '';
+                            const meta = context[0].chart.data.datasets[0].drillMeta;
+                            if (meta && meta.itemType === 'alias' && meta.rawItems && meta.rawItems[context[0].dataIndex] !== undefined) {
+                                return meta.rawItems[context[0].dataIndex];
+                            }
+                            return context[0].label;
+                        },
                         label: function(context) {
-                            return ` ${context.dataset.label}: ${formatBytes(context.parsed.y)}`;
+                            let label = ` ${context.dataset.label}: ${formatBytes(context.parsed.y)}`;
+                            const meta = context.chart.data.datasets[0].drillMeta;
+                            if (meta && meta.flowCounts && meta.flowCounts[context.dataIndex] !== undefined) {
+                                label += ` (${formatNumber(meta.flowCounts[context.dataIndex])} flows)`;
+                            }
+                            return label;
                         }
                     }
                 }
@@ -3924,6 +3988,8 @@ function renderAnomaliesBarChart(canvasId, labels, data, label, bgColor, borderC
                     },
                     ticks: {
                         color: '#9ca3af',
+                        maxRotation: 45,
+                        minRotation: 0,
                         font: {
                             size: 10
                         }
@@ -3998,6 +4064,7 @@ function renderConditions(viewType) {
         const badgeLabel = (idx === 0) ? '條件 1' : logic;
         const badgeStyle = (idx === 0) ? 'background: rgba(255,255,255,0.08); color: var(--text-secondary);' : '';
         const isIp = ['src_ip', 'dst_ip', 'any_ip'].includes(cond.field);
+        const isAlias = ['ip_alias', 'src_alias', 'dst_alias'].includes(cond.field);
         const isPort = ['src_port', 'dst_port', 'any_port'].includes(cond.field);
         const isProto = cond.field === 'proto';
 
@@ -4008,6 +4075,9 @@ function renderConditions(viewType) {
                     <option value="src_ip" ${cond.field === 'src_ip' ? 'selected' : ''}>來源 IP</option>
                     <option value="dst_ip" ${cond.field === 'dst_ip' ? 'selected' : ''}>目的 IP</option>
                     <option value="any_ip" ${cond.field === 'any_ip' ? 'selected' : ''}>任一端 IP</option>
+                    <option value="ip_alias" ${cond.field === 'ip_alias' ? 'selected' : ''}>IP 別名 (任一端)</option>
+                    <option value="src_alias" ${cond.field === 'src_alias' ? 'selected' : ''}>來源 IP 別名</option>
+                    <option value="dst_alias" ${cond.field === 'dst_alias' ? 'selected' : ''}>目的 IP 別名</option>
                     <option value="src_port" ${cond.field === 'src_port' ? 'selected' : ''}>來源 Port</option>
                     <option value="dst_port" ${cond.field === 'dst_port' ? 'selected' : ''}>目的 Port</option>
                     <option value="any_port" ${cond.field === 'any_port' ? 'selected' : ''}>任一端 Port</option>
@@ -4021,7 +4091,7 @@ function renderConditions(viewType) {
                 <input type="${isPort ? 'number' : 'text'}" 
                        class="condition-input cond-val" 
                        data-index="${idx}" 
-                       placeholder="${isIp ? '例如: 192.168.1.1 或 10.0.0.0/8' : (isPort ? '例如: 80, 443' : '例如: TCP 或 6')}" 
+                       placeholder="${isIp ? '例如: 192.168.1.1 或 10.0.0.0/8' : (isAlias ? '例如: Cloudflare, Core-Router' : (isPort ? '例如: 80, 443' : '例如: TCP 或 6'))}" 
                        value="${escapeHtml(cond.val || '')}" 
                        style="display: ${isIp && cond.ipType !== 'custom' ? 'none' : 'block'};">
                 <button type="button" class="btn-remove-condition" data-index="${idx}" title="移除此條件">
@@ -4036,12 +4106,15 @@ function renderConditions(viewType) {
         window.lucide.createIcons();
     }
 
+    const getTargetList = () => isFlow ? state.filters.conditions : state.anomaliesFilters.conditions;
+
     // Attach row events
     container.querySelectorAll('.cond-field').forEach(sel => {
         sel.addEventListener('change', (e) => {
             const idx = parseInt(e.target.getAttribute('data-index'));
             const field = e.target.value;
-            const targetCond = conditions[idx];
+            const targetList = getTargetList();
+            const targetCond = targetList ? targetList[idx] : null;
             if (targetCond) {
                 targetCond.field = field;
                 if (['src_ip', 'dst_ip', 'any_ip'].includes(field)) {
@@ -4056,7 +4129,8 @@ function renderConditions(viewType) {
         sel.addEventListener('change', (e) => {
             const idx = parseInt(e.target.getAttribute('data-index'));
             const ipType = e.target.value;
-            const targetCond = conditions[idx];
+            const targetList = getTargetList();
+            const targetCond = targetList ? targetList[idx] : null;
             if (targetCond) {
                 targetCond.ipType = ipType;
                 if (ipType !== 'custom') {
@@ -4072,7 +4146,8 @@ function renderConditions(viewType) {
     container.querySelectorAll('.cond-val').forEach(inp => {
         inp.addEventListener('input', (e) => {
             const idx = parseInt(e.target.getAttribute('data-index'));
-            const targetCond = conditions[idx];
+            const targetList = getTargetList();
+            const targetCond = targetList ? targetList[idx] : null;
             if (targetCond) {
                 targetCond.val = e.target.value;
             }
@@ -4082,10 +4157,12 @@ function renderConditions(viewType) {
                 e.preventDefault();
                 if (isFlow) {
                     applyFiltersFromForm();
+                    renderConditions('flow');
                     state.pagination.offset = 0;
                     refreshData();
                 } else {
                     applyAnomaliesFiltersFromForm();
+                    renderConditions('anomalies');
                     state.anomaliesPagination.offset = 0;
                     fetchAnomalousReport();
                 }
@@ -4097,7 +4174,10 @@ function renderConditions(viewType) {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             const idx = parseInt(btn.getAttribute('data-index'));
-            conditions.splice(idx, 1);
+            const targetList = getTargetList();
+            if (targetList && targetList[idx] !== undefined) {
+                targetList.splice(idx, 1);
+            }
             renderConditions(viewType);
             if (isFlow) {
                 applyFiltersFromForm();
@@ -4116,6 +4196,7 @@ function renderConditions(viewType) {
 function addCondition(viewType, field = 'src_ip', val = '', ipType = 'custom') {
     const isFlow = (viewType === 'flow');
     if (isFlow) {
+        applyFiltersFromForm();
         if (!state.filters.conditions) state.filters.conditions = [];
         state.filters.conditions.push({
             id: genConditionId(),
@@ -4124,6 +4205,7 @@ function addCondition(viewType, field = 'src_ip', val = '', ipType = 'custom') {
             val: String(val || '')
         });
     } else {
+        applyAnomaliesFiltersFromForm();
         if (!state.anomaliesFilters.conditions) state.anomaliesFilters.conditions = [];
         state.anomaliesFilters.conditions.push({
             id: genConditionId(),
@@ -4231,6 +4313,18 @@ function showChartContextMenu(nativeEvent, itemType, rawVal, viewType, defaultDi
                 <i data-lucide="activity"></i> <span>➕ 追加為通訊協定 (${rawVal})</span>
             </div>
         `;
+    } else if (itemType === 'alias') {
+        html += `
+            <div class="chart-context-menu-item" data-action="filter-alias" data-dir="any" data-val="${rawVal}">
+                <i data-lucide="tag"></i> <span>➕ 追加為任一端 IP 別名 (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-alias" data-dir="src" data-val="${rawVal}">
+                <i data-lucide="arrow-up-right"></i> <span>➕ 追加為來源 IP 別名 (${rawVal})</span>
+            </div>
+            <div class="chart-context-menu-item" data-action="filter-alias" data-dir="dst" data-val="${rawVal}">
+                <i data-lucide="arrow-down-left"></i> <span>➕ 追加為目的 IP 別名 (${rawVal})</span>
+            </div>
+        `;
     }
 
     menu.innerHTML = html;
@@ -4270,6 +4364,8 @@ function applyDrillDownFilter(viewType, action, dir, val) {
     let field = 'any_ip';
     if (action === 'filter-ip') {
         field = dir === 'src' ? 'src_ip' : (dir === 'dst' ? 'dst_ip' : 'any_ip');
+    } else if (action === 'filter-alias') {
+        field = dir === 'src' ? 'src_alias' : (dir === 'dst' ? 'dst_alias' : 'ip_alias');
     } else if (action === 'filter-port') {
         field = dir === 'src' ? 'src_port' : (dir === 'dst' ? 'dst_port' : 'any_port');
     } else if (action === 'filter-proto') {

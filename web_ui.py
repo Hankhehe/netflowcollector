@@ -354,18 +354,83 @@ def load_ip_aliases():
     except Exception as e:
         print(f"[Startup Init] Error loading IP aliases into cache: {e}")
 
+def find_ips_by_alias(alias_query: str, max_results: int = 100) -> List[str]:
+    """Search SQLite ip_aliases by alias name (exact match or substring match) and return list of IP/CIDR strings."""
+    if not alias_query or not str(alias_query).strip():
+        return []
+    alias_clean = str(alias_query).strip()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ip FROM ip_aliases WHERE name = ? OR name LIKE ? LIMIT ?",
+            (alias_clean, f"%{alias_clean}%", max_results)
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [r[0].strip() for r in rows if r[0]]
+    except Exception as e:
+        print(f"[find_ips_by_alias] Error: {e}", file=sys.stderr)
+        return []
+
+def build_alias_where_clause(col: str, alias_query: str, params: dict, prefix: str) -> str:
+    """Build ClickHouse SQL clause that matches records where `col` has an IP belonging to `alias_query`."""
+    matched_ips = find_ips_by_alias(alias_query)
+    if not matched_ips:
+        return "1 = 0"
+    
+    sub_clauses = []
+    for idx, ip_val in enumerate(matched_ips):
+        param_k = f"{prefix}_al_{idx}"
+        if col in ("any", "any_ip", "ip_alias", "alias"):
+            c_src = build_ip_where_clause("src", ip_val, params, f"{param_k}_s")
+            c_dst = build_ip_where_clause("dst", ip_val, params, f"{param_k}_d")
+            sub_clauses.append(f"({c_src} OR {c_dst})")
+        else:
+            sub_clauses.append(build_ip_where_clause(col, ip_val, params, param_k))
+            
+    if len(sub_clauses) == 1:
+        return sub_clauses[0]
+    return f"({' OR '.join(sub_clauses)})"
+
 def build_ip_where_clause(col: str, ip_query: str, params: dict, param_key: str) -> str:
     val = ip_query.strip().lower()
+    safe_col = f"if(isIPv4String({col}) OR isIPv6String({col}), {col}, '0.0.0.0')"
     if val == "internal":
-        return f"(isIPv4String({col}) OR isIPv6String({col})) AND (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+        return (
+            f"((isIPv4String({col}) OR isIPv6String({col})) AND "
+            f"(isIPAddressInRange({safe_col}, '192.168.0.0/16') OR "
+            f"isIPAddressInRange({safe_col}, '172.16.0.0/12') OR "
+            f"isIPAddressInRange({safe_col}, '10.0.0.0/8')))"
+        )
     elif val == "external":
-        return f"(isIPv4String({col}) OR isIPv6String({col})) AND NOT (isIPAddressInRange({col}, '192.168.0.0/16') OR isIPAddressInRange({col}, '172.16.0.0/12') OR isIPAddressInRange({col}, '10.0.0.0/8'))"
+        return (
+            f"((isIPv4String({col}) OR isIPv6String({col})) AND NOT "
+            f"(isIPAddressInRange({safe_col}, '192.168.0.0/16') OR "
+            f"isIPAddressInRange({safe_col}, '172.16.0.0/12') OR "
+            f"isIPAddressInRange({safe_col}, '10.0.0.0/8')))"
+        )
     else:
         if "/" in ip_query:
             params[param_key] = ip_query.strip()
-            return f"isIPAddressInRange({col}, %({param_key})s)"
+            return f"((isIPv4String({col}) OR isIPv6String({col})) AND isIPAddressInRange({safe_col}, %({param_key})s))"
         else:
-            params[param_key] = f"{ip_query.strip()}%"
+            raw_str = ip_query.strip()
+            # If string contains characters not typical in pure IP prefixes, check alias
+            is_ip_like = True
+            for ch in raw_str:
+                if ch not in "0123456789abcdefABCDEF.:/%":
+                    is_ip_like = False
+                    break
+            if not is_ip_like:
+                matched_ips = find_ips_by_alias(raw_str)
+                if matched_ips:
+                    sub_c = []
+                    for idx, mip in enumerate(matched_ips):
+                        sub_c.append(build_ip_where_clause(col, mip, params, f"{param_key}_al_{idx}"))
+                    return f"({' OR '.join(sub_c)})" if len(sub_c) > 1 else sub_c[0]
+
+            params[param_key] = f"{raw_str}%"
             return f"{col} LIKE %({param_key})s"
 
 def parse_conditions_where_clause(conditions_json: Optional[str], logic: str, params: dict, prefix: str = "dyn") -> Optional[str]:
@@ -396,6 +461,12 @@ def parse_conditions_where_clause(conditions_json: Optional[str], logic: str, pa
                 c_src = build_ip_where_clause("src", val, params, f"{sub_key}_asrc")
                 c_dst = build_ip_where_clause("dst", val, params, f"{sub_key}_adst")
                 clauses.append(f"({c_src} OR {c_dst})")
+            elif field in ("alias", "ip_alias", "any_alias"):
+                clauses.append(build_alias_where_clause("any", val, params, f"{sub_key}_alias"))
+            elif field in ("src_alias", "source_alias"):
+                clauses.append(build_alias_where_clause("src", val, params, f"{sub_key}_salias"))
+            elif field in ("dst_alias", "dest_alias"):
+                clauses.append(build_alias_where_clause("dst", val, params, f"{sub_key}_dalias"))
             elif field in ("sport", "src_port"):
                 try:
                     params[f"{sub_key}_sport"] = int(val)
@@ -635,6 +706,7 @@ def init_db():
             prefix_len INTEGER
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ip_aliases_range ON ip_aliases (start_ip, end_ip, prefix_len)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ip_aliases_name ON ip_aliases (name)")
         
         # Initialize audit rules table
         cur.execute("""CREATE TABLE IF NOT EXISTS audit_rules (
@@ -1468,6 +1540,7 @@ def get_flows(
     ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    alias: Optional[str] = Query(None, description="IP alias search (either source or destination)"),
     port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
@@ -1490,6 +1563,9 @@ def get_flows(
 
         where_clauses = []
         params = {}
+
+        if alias:
+            where_clauses.append(build_alias_where_clause("any", alias, params, "q_alias"))
 
         dyn_clause = parse_conditions_where_clause(conditions, logic, params, "flow_dyn")
         if dyn_clause:
@@ -1754,6 +1830,7 @@ def export_flows(
     ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    alias: Optional[str] = Query(None, description="IP alias search (either source or destination)"),
     port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
@@ -1778,6 +1855,9 @@ def export_flows(
 
         where_clauses = []
         params = {}
+
+        if alias:
+            where_clauses.append(build_alias_where_clause("any", alias, params, "exp_alias"))
 
         dyn_clause = parse_conditions_where_clause(conditions, logic, params, "flow_exp_dyn")
         if dyn_clause:
@@ -2072,6 +2152,7 @@ def get_stats(
     ip: Optional[str] = Query(None, description="IP address or prefix (either source or destination)"),
     src: Optional[str] = Query(None, description="Source IP prefix"),
     dst: Optional[str] = Query(None, description="Destination IP prefix"),
+    alias: Optional[str] = Query(None, description="IP alias search (either source or destination)"),
     port: Optional[int] = Query(None, description="Port (either source or destination)"),
     sport: Optional[int] = Query(None, description="Source port"),
     dport: Optional[int] = Query(None, description="Destination port"),
@@ -2090,6 +2171,9 @@ def get_stats(
         # Build dynamic where clauses
         where_clauses = []
         params = {}
+
+        if alias:
+            where_clauses.append(build_alias_where_clause("any", alias, params, "s_alias"))
 
         if exporter:
             exp_parts = [e.strip() for e in exporter.split(",") if e.strip()]
@@ -2214,7 +2298,7 @@ def get_stats(
                 time_format = "%Y-%m-%d"
                 ch_group_fn = "toStartOfDay(ts + INTERVAL 8 HOUR)"
 
-        # Execute all 8 aggregation queries concurrently across ClickHouse thread-local clients
+        # Execute aggregation queries concurrently across ClickHouse thread-local clients
         q_totals = f"SELECT COUNT() as total_flows, SUM(packets) as total_packets, SUM(octets) as total_bytes FROM ({combined_flows})"
         q_top_src = f"SELECT src, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY src ORDER BY bytes DESC LIMIT 10"
         q_top_dst = f"SELECT dst, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY dst ORDER BY bytes DESC LIMIT 10"
@@ -2223,6 +2307,7 @@ def get_stats(
         q_time = f"SELECT {ch_group_fn} as time_bin, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) GROUP BY time_bin ORDER BY time_bin ASC"
         q_sport = f"SELECT sport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) WHERE sport IS NOT NULL GROUP BY sport ORDER BY bytes DESC LIMIT 10"
         q_dport = f"SELECT dport, SUM(octets) as bytes, SUM(packets) as packets, COUNT() as flows FROM ({combined_flows}) WHERE dport IS NOT NULL GROUP BY dport ORDER BY bytes DESC LIMIT 10"
+        q_top_pairs = f"SELECT src, dst, SUM(octets) as bytes, COUNT() as flows FROM ({combined_flows}) GROUP BY src, dst ORDER BY bytes DESC LIMIT 1000"
 
         f_totals = ch_query_executor.submit(_run_ch_query, q_totals, params)
         f_top_src = ch_query_executor.submit(_run_ch_query, q_top_src, params)
@@ -2232,6 +2317,7 @@ def get_stats(
         f_time = ch_query_executor.submit(_run_ch_query, q_time, params)
         f_sport = ch_query_executor.submit(_run_ch_query, q_sport, params)
         f_dport = ch_query_executor.submit(_run_ch_query, q_dport, params)
+        f_top_pairs = ch_query_executor.submit(_run_ch_query, q_top_pairs, params)
 
         # 1. Overall Totals
         res = f_totals.result()
@@ -2311,6 +2397,32 @@ def get_stats(
         for item in top_destination_ports:
             item["port_name"] = port_aliases_cache.get(item.get("dport"), "") if item.get("dport") is not None else ""
 
+        # 9. Top IP Aliases (Bidirectional aggregated, deduplicated if both endpoints share same alias)
+        res_pairs = f_top_pairs.result()
+        pair_rows = [dict(zip(res_pairs.column_names, r)) for r in res_pairs.result_rows]
+        pair_ips = set()
+        for r in pair_rows:
+            if r.get("src"):
+                pair_ips.add(r["src"])
+            if r.get("dst"):
+                pair_ips.add(r["dst"])
+        alias_map_pairs = resolve_ip_aliases_batch(pair_ips)
+        alias_aggregated = {}
+        for r in pair_rows:
+            s_alias = alias_map_pairs.get(r.get("src"))
+            d_alias = alias_map_pairs.get(r.get("dst"))
+            matched_aliases = set()
+            if s_alias:
+                matched_aliases.add(s_alias)
+            if d_alias:
+                matched_aliases.add(d_alias)
+            for al in matched_aliases:
+                if al not in alias_aggregated:
+                    alias_aggregated[al] = {"name": al, "bytes": 0, "flows": 0}
+                alias_aggregated[al]["bytes"] += (r.get("bytes") or 0)
+                alias_aggregated[al]["flows"] += (r.get("flows") or 0)
+        top_aliases = sorted(alias_aggregated.values(), key=lambda x: x["bytes"], reverse=True)[:10]
+
         return {
             "total_flows": total_flows,
             "total_packets": total_packets,
@@ -2319,6 +2431,7 @@ def get_stats(
             "top_destinations": top_destinations,
             "top_exporters": top_exporters,
             "protocols": protocols,
+            "top_aliases": top_aliases,
             "traffic_over_time": traffic_over_time,
             "top_source_ports": top_source_ports,
             "top_destination_ports": top_destination_ports
@@ -2779,20 +2892,22 @@ def build_rule_sql_condition(rule: Dict[str, Any], idx: int, params: Dict[str, A
     if ip_raw:
         ip_str = str(ip_raw).strip()
         ip_lower = ip_str.lower()
+        safe_src = "if(isIPv4String(src) OR isIPv6String(src), src, '0.0.0.0')"
+        safe_dst = "if(isIPv4String(dst) OR isIPv6String(dst), dst, '0.0.0.0')"
         if ip_lower == "internal":
-            internal_nets = "isIPAddressInRange(src, '10.0.0.0/8') OR isIPAddressInRange(src, '172.16.0.0/12') OR isIPAddressInRange(src, '192.168.0.0/16')"
-            internal_netd = "isIPAddressInRange(dst, '10.0.0.0/8') OR isIPAddressInRange(dst, '172.16.0.0/12') OR isIPAddressInRange(dst, '192.168.0.0/16')"
-            ip_cond = f"((isIPv4String(src) AND ({internal_nets})) OR (isIPv4String(dst) AND ({internal_netd})))"
+            internal_nets = f"isIPAddressInRange({safe_src}, '10.0.0.0/8') OR isIPAddressInRange({safe_src}, '172.16.0.0/12') OR isIPAddressInRange({safe_src}, '192.168.0.0/16')"
+            internal_netd = f"isIPAddressInRange({safe_dst}, '10.0.0.0/8') OR isIPAddressInRange({safe_dst}, '172.16.0.0/12') OR isIPAddressInRange({safe_dst}, '192.168.0.0/16')"
+            ip_cond = f"(((isIPv4String(src) OR isIPv6String(src)) AND ({internal_nets})) OR ((isIPv4String(dst) OR isIPv6String(dst)) AND ({internal_netd})))"
             sub_conds.append(ip_cond)
         elif ip_lower == "external":
-            ext_nets = "NOT (isIPAddressInRange(src, '10.0.0.0/8') OR isIPAddressInRange(src, '172.16.0.0/12') OR isIPAddressInRange(src, '192.168.0.0/16'))"
-            ext_netd = "NOT (isIPAddressInRange(dst, '10.0.0.0/8') OR isIPAddressInRange(dst, '172.16.0.0/12') OR isIPAddressInRange(dst, '192.168.0.0/16'))"
-            ip_cond = f"((isIPv4String(src) AND ({ext_nets})) OR (isIPv4String(dst) AND ({ext_netd})))"
+            ext_nets = f"NOT (isIPAddressInRange({safe_src}, '10.0.0.0/8') OR isIPAddressInRange({safe_src}, '172.16.0.0/12') OR isIPAddressInRange({safe_src}, '192.168.0.0/16'))"
+            ext_netd = f"NOT (isIPAddressInRange({safe_dst}, '10.0.0.0/8') OR isIPAddressInRange({safe_dst}, '172.16.0.0/12') OR isIPAddressInRange({safe_dst}, '192.168.0.0/16'))"
+            ip_cond = f"(((isIPv4String(src) OR isIPv6String(src)) AND ({ext_nets})) OR ((isIPv4String(dst) OR isIPv6String(dst)) AND ({ext_netd})))"
             sub_conds.append(ip_cond)
         elif "/" in ip_str:
             p_name = f"rule_{idx}_cidr"
             params[p_name] = ip_str
-            ip_cond = f"(((isIPv4String(src) OR isIPv6String(src)) AND isIPAddressInRange(src, %({p_name})s)) OR ((isIPv4String(dst) OR isIPv6String(dst)) AND isIPAddressInRange(dst, %({p_name})s)))"
+            ip_cond = f"(((isIPv4String(src) OR isIPv6String(src)) AND isIPAddressInRange({safe_src}, %({p_name})s)) OR ((isIPv4String(dst) OR isIPv6String(dst)) AND isIPAddressInRange({safe_dst}, %({p_name})s)))"
             sub_conds.append(ip_cond)
         else:
             p_name = f"rule_{idx}_ip"
@@ -3343,6 +3458,7 @@ def get_audit_matches_stats(
     ip: Optional[str] = Query(None),
     src: Optional[str] = Query(None),
     dst: Optional[str] = Query(None),
+    alias: Optional[str] = Query(None),
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
@@ -3356,6 +3472,9 @@ def get_audit_matches_stats(
         ensure_matched_flows_table(client)
         where_clauses = []
         params = {}
+
+        if alias:
+            where_clauses.append(build_alias_where_clause("any", alias, params, "ms_alias"))
         
         dyn_clause = parse_conditions_where_clause(conditions, logic, params, "audit_stats_dyn")
         if dyn_clause:
@@ -3513,6 +3632,18 @@ def get_audit_matches_stats(
             """,
             params
         )
+        f_top_pairs = ch_query_executor.submit(
+            _run_ch_query,
+            f"""
+            SELECT src, dst, SUM(octets) as bytes, COUNT() as flows
+            FROM matched_flows
+            {where_sql}
+            GROUP BY src, dst
+            ORDER BY bytes DESC
+            LIMIT 1000
+            """,
+            params
+        )
         f_range = ch_query_executor.submit(
             _run_ch_query,
             f"SELECT min(ts), max(ts) FROM matched_flows {where_sql}",
@@ -3621,6 +3752,32 @@ def get_audit_matches_stats(
             port = item.get("port")
             item["port_name"] = port_aliases_cache.get(port, "") if port is not None else ""
 
+        # Calculate Top IP Aliases (Bidirectional aggregated, deduplicated if both endpoints share same alias)
+        res_pairs = f_top_pairs.result()
+        pair_rows = [dict(zip(res_pairs.column_names, r)) for r in res_pairs.result_rows]
+        pair_ips = set()
+        for r in pair_rows:
+            if r.get("src"):
+                pair_ips.add(r["src"])
+            if r.get("dst"):
+                pair_ips.add(r["dst"])
+        alias_map_pairs = resolve_ip_aliases_batch(pair_ips)
+        alias_aggregated = {}
+        for r in pair_rows:
+            s_alias = alias_map_pairs.get(r.get("src"))
+            d_alias = alias_map_pairs.get(r.get("dst"))
+            matched_aliases = set()
+            if s_alias:
+                matched_aliases.add(s_alias)
+            if d_alias:
+                matched_aliases.add(d_alias)
+            for al in matched_aliases:
+                if al not in alias_aggregated:
+                    alias_aggregated[al] = {"name": al, "bytes": 0, "flows": 0}
+                alias_aggregated[al]["bytes"] += (r.get("bytes") or 0)
+                alias_aggregated[al]["flows"] += (r.get("flows") or 0)
+        top_aliases = sorted(alias_aggregated.values(), key=lambda x: x["bytes"], reverse=True)[:10]
+
         return {
             "total_flows": total_flows,
             "total_packets": total_packets,
@@ -3632,6 +3789,7 @@ def get_audit_matches_stats(
             "top_ports": top_ports,
             "protocols": protocols,
             "ip_protocols": ip_protocols,
+            "top_aliases": top_aliases,
             "flags": flags,
             "traffic_over_time": traffic_over_time
         }
@@ -3646,6 +3804,7 @@ def get_audit_matches(
     ip: Optional[str] = Query(None),
     src: Optional[str] = Query(None),
     dst: Optional[str] = Query(None),
+    alias: Optional[str] = Query(None),
     sport: Optional[int] = Query(None),
     dport: Optional[int] = Query(None),
     port: Optional[int] = Query(None),
@@ -3661,6 +3820,9 @@ def get_audit_matches(
         ensure_matched_flows_table(client)
         where_clauses = []
         params = {}
+
+        if alias:
+            where_clauses.append(build_alias_where_clause("any", alias, params, "m_alias"))
         
         dyn_clause = parse_conditions_where_clause(conditions, logic, params, "audit_dyn")
         if dyn_clause:
