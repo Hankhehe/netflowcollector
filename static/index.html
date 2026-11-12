@@ -574,6 +574,82 @@
             <section id="view-data-management" class="dashboard-view" style="padding: 20px;">
                 <div style="max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
                     
+                    <!-- Card 0: ClickHouse Database Connection Settings -->
+                    <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
+                        <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <i data-lucide="database" class="icon-sm" style="color: var(--color-primary); width: 22px; height: 22px;"></i>
+                                <h3 style="font-size: 1.15rem; font-weight: 600; margin: 0;">ClickHouse 資料庫連線設定</h3>
+                            </div>
+                            <span id="ch-status-badge" class="badge badge-secondary" style="padding: 5px 12px; font-size: 0.82rem;">檢測中...</span>
+                        </div>
+                        <div class="card-body" style="padding: 24px;">
+                            <p class="text-muted" style="margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
+                                設定系統中 NetFlow / IPFIX 流量儲存與查詢之 ClickHouse 伺服器主機、連線通訊埠、身分驗證帳號密碼及資料庫名稱。儲存後將即時套用連線並自動檢查資料表結構。
+                            </p>
+
+                            <!-- Form Controls -->
+                            <form id="form-ch-settings" style="display: flex; flex-direction: column; gap: 18px;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                                    <div class="form-group">
+                                        <label for="input-ch-host" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            ClickHouse 主機 (IP / Host)：
+                                        </label>
+                                        <input type="text" id="input-ch-host" class="form-control select-dark" placeholder="例如 192.168.21.185" required style="width: 100%; font-family: var(--font-mono);">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="input-ch-port" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            HTTP 連接埠 (Port)：
+                                        </label>
+                                        <input type="number" id="input-ch-port" class="form-control select-dark" min="1" max="65535" value="8123" required style="width: 100%; font-family: var(--font-mono);">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="input-ch-database" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            資料庫名稱 (DB Name)：
+                                        </label>
+                                        <input type="text" id="input-ch-database" class="form-control select-dark" value="default" required style="width: 100%; font-family: var(--font-mono);">
+                                    </div>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
+                                    <div class="form-group">
+                                        <label for="input-ch-user" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            登入帳號 (Username)：
+                                        </label>
+                                        <input type="text" id="input-ch-user" class="form-control select-dark" placeholder="預設 admin 或 default" required style="width: 100%; font-family: var(--font-mono);">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="input-ch-password" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem;">
+                                            登入密碼 (Password)：
+                                        </label>
+                                        <div style="position: relative; display: flex; align-items: center;">
+                                            <input type="password" id="input-ch-password" class="form-control select-dark" placeholder="若無密碼可留空" style="width: 100%; font-family: var(--font-mono); padding-right: 40px;">
+                                            <button type="button" id="btn-toggle-ch-pwd" style="position: absolute; right: 8px; background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; padding: 4px;">
+                                                <i data-lucide="eye" style="width: 16px; height: 16px;"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap;">
+                                    <button type="button" id="btn-test-ch-conn" class="btn btn-secondary" style="height: 38px; padding: 0 16px; display: flex; align-items: center; gap: 8px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 6px; cursor: pointer;">
+                                        <i data-lucide="zap" style="width: 16px; height: 16px; color: #fbbf24;"></i>
+                                        <span>測試連線</span>
+                                    </button>
+                                    <button type="submit" id="btn-save-ch-settings" class="btn btn-primary" style="height: 38px; padding: 0 18px; display: flex; align-items: center; gap: 8px; border-radius: 6px;">
+                                        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
+                                        <span>儲存並套用設定</span>
+                                    </button>
+                                </div>
+
+                                <div id="ch-settings-feedback" style="display: none; padding: 12px 16px; border-radius: 8px; font-size: 0.88rem; line-height: 1.4;"></div>
+                            </form>
+                        </div>
+                    </div>
+
                     <!-- Card 1: Retention Policy & Auto Scheduler -->
                     <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; backdrop-filter: var(--glass-blur); margin: 0;">
                         <div class="card-header" style="border-bottom: 1px solid var(--border-color); padding: 18px 24px; display: flex; align-items: center; justify-content: space-between;">
@@ -1577,6 +1653,6 @@
     <div id="chart-context-menu" class="chart-context-menu" style="display: none;"></div>
 
     <!-- Custom Script -->
-    <script src="app.js?v=20261112c"></script>
+    <script src="app.js?v=20261112_ch"></script>
 </body>
 </html>

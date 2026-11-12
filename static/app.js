@@ -233,6 +233,17 @@ const els = {
     // Users & New Settings Elements
     btnTabUsers: document.getElementById('btn-tab-users'),
     viewUserManagement: document.getElementById('view-user-management'),
+    formChSettings: document.getElementById('form-ch-settings'),
+    inputChHost: document.getElementById('input-ch-host'),
+    inputChPort: document.getElementById('input-ch-port'),
+    inputChDatabase: document.getElementById('input-ch-database'),
+    inputChUser: document.getElementById('input-ch-user'),
+    inputChPassword: document.getElementById('input-ch-password'),
+    btnToggleChPwd: document.getElementById('btn-toggle-ch-pwd'),
+    btnTestChConn: document.getElementById('btn-test-ch-conn'),
+    btnSaveChSettings: document.getElementById('btn-save-ch-settings'),
+    chStatusBadge: document.getElementById('ch-status-badge'),
+    chSettingsFeedback: document.getElementById('ch-settings-feedback'),
     inputRetentionDays: document.getElementById('input-retention-days'),
     inputRetentionTime: document.getElementById('input-retention-time'),
     selectRetentionEnabled: document.getElementById('select-retention-enabled'),
@@ -518,6 +529,31 @@ function setupEventListeners() {
         els.btnTabUsers.addEventListener('click', (e) => {
             e.preventDefault();
             switchTab('users');
+        });
+    }
+
+    // ClickHouse Settings Listeners
+    if (els.btnToggleChPwd) {
+        els.btnToggleChPwd.addEventListener('click', () => {
+            if (els.inputChPassword) {
+                const isPwd = els.inputChPassword.type === 'password';
+                els.inputChPassword.type = isPwd ? 'text' : 'password';
+                els.btnToggleChPwd.innerHTML = isPwd ? '<i data-lucide="eye-off" style="width: 16px; height: 16px;"></i>' : '<i data-lucide="eye" style="width: 16px; height: 16px;"></i>';
+                if (window.lucide) lucide.createIcons();
+            }
+        });
+    }
+
+    if (els.btnTestChConn) {
+        els.btnTestChConn.addEventListener('click', () => {
+            testClickHouseConnection();
+        });
+    }
+
+    if (els.formChSettings) {
+        els.formChSettings.addEventListener('submit', (e) => {
+            e.preventDefault();
+            saveClickHouseSettings();
         });
     }
 
@@ -1269,6 +1305,7 @@ function switchTab(tabName) {
         if (tabName === 'data-management') {
             activeBtn = els.btnTabManagement;
             activeView = els.viewDataManagement;
+            fetchClickHouseSettings();
             fetchRetentionSettings();
         } else if (tabName === 'aliases') {
             activeBtn = els.btnTabAliases;
@@ -4740,6 +4777,155 @@ function showRetentionAlert(msg, type) {
         el.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
         el.style.color = '#60a5fa';
         el.style.border = '1px solid rgba(59, 130, 246, 0.3)';
+    }
+}
+
+// ---------------- ClickHouse Connection Settings Logic ----------------
+function showChSettingsFeedback(msg, type) {
+    const el = els.chSettingsFeedback;
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerText = msg;
+    if (type === 'success') {
+        el.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#34d399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else if (type === 'error') {
+        el.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+        el.style.color = '#f87171';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else {
+        el.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+        el.style.color = '#60a5fa';
+        el.style.border = '1px solid rgba(59, 130, 246, 0.3)';
+    }
+}
+
+async function fetchClickHouseSettings() {
+    try {
+        const res = await fetch('/api/settings/clickhouse');
+        if (!res.ok) throw new Error('讀取 ClickHouse 設定失敗');
+        const data = await res.json();
+        
+        if (els.inputChHost) els.inputChHost.value = data.host || '';
+        if (els.inputChPort) els.inputChPort.value = data.port || 8123;
+        if (els.inputChDatabase) els.inputChDatabase.value = data.database || 'default';
+        if (els.inputChUser) els.inputChUser.value = data.user || '';
+        if (els.inputChPassword) els.inputChPassword.value = data.password || '';
+        
+        if (els.chStatusBadge) {
+            if (data.status === 'connected') {
+                els.chStatusBadge.className = 'badge badge-success';
+                els.chStatusBadge.innerText = `已連線 (v${data.version || ''})`;
+            } else {
+                els.chStatusBadge.className = 'badge badge-danger';
+                els.chStatusBadge.innerText = '連線異常';
+            }
+        }
+    } catch (err) {
+        if (els.chStatusBadge) {
+            els.chStatusBadge.className = 'badge badge-danger';
+            els.chStatusBadge.innerText = '讀取失敗';
+        }
+    }
+}
+
+async function testClickHouseConnection() {
+    const host = (els.inputChHost.value || '').trim();
+    const port = parseInt(els.inputChPort.value, 10);
+    const database = (els.inputChDatabase.value || '').trim();
+    const user = (els.inputChUser.value || '').trim();
+    const password = els.inputChPassword.value || '';
+
+    if (!host) {
+        showChSettingsFeedback('請輸入 ClickHouse 主機 IP 或位址', 'error');
+        return;
+    }
+    if (isNaN(port) || port < 1 || port > 65535) {
+        showChSettingsFeedback('請輸入有效的 Port (1-65535)', 'error');
+        return;
+    }
+    if (!database) {
+        showChSettingsFeedback('請輸入資料庫名稱 (預設 default)', 'error');
+        return;
+    }
+    if (!user) {
+        showChSettingsFeedback('請輸入登入帳號', 'error');
+        return;
+    }
+
+    showChSettingsFeedback(`正在測試連線至 ${host}:${port} (${database})...`, 'info');
+    if (els.btnTestChConn) els.btnTestChConn.disabled = true;
+
+    try {
+        const res = await fetch('/api/settings/clickhouse/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, port, database, user, password })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showChSettingsFeedback(data.message, 'success');
+            if (els.chStatusBadge) {
+                els.chStatusBadge.className = 'badge badge-success';
+                els.chStatusBadge.innerText = `測試成功 (v${data.version || ''})`;
+            }
+        } else {
+            showChSettingsFeedback(data.message || '連線測試失敗', 'error');
+        }
+    } catch (err) {
+        showChSettingsFeedback(`測試失敗: ${err.message}`, 'error');
+    } finally {
+        if (els.btnTestChConn) els.btnTestChConn.disabled = false;
+    }
+}
+
+async function saveClickHouseSettings() {
+    const host = (els.inputChHost.value || '').trim();
+    const port = parseInt(els.inputChPort.value, 10);
+    const database = (els.inputChDatabase.value || '').trim();
+    const user = (els.inputChUser.value || '').trim();
+    const password = els.inputChPassword.value || '';
+
+    if (!host) {
+        showChSettingsFeedback('請輸入 ClickHouse 主機 IP 或位址', 'error');
+        return;
+    }
+    if (isNaN(port) || port < 1 || port > 65535) {
+        showChSettingsFeedback('請輸入有效的 Port (1-65535)', 'error');
+        return;
+    }
+    if (!database) {
+        showChSettingsFeedback('請輸入資料庫名稱 (預設 default)', 'error');
+        return;
+    }
+    if (!user) {
+        showChSettingsFeedback('請輸入登入帳號', 'error');
+        return;
+    }
+
+    if (!confirm(`確定要儲存並切換 ClickHouse 指向至 ${host}:${port} (${database}) 嗎？\n系統將立即套用此連線設定並自動校驗資料表。`)) {
+        return;
+    }
+
+    showChSettingsFeedback('正在儲存設定並驗證連線...', 'info');
+    if (els.btnSaveChSettings) els.btnSaveChSettings.disabled = true;
+
+    try {
+        const res = await fetch('/api/settings/clickhouse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, port, database, user, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '儲存失敗');
+
+        showChSettingsFeedback(data.message || 'ClickHouse 連線設定儲存成功！', 'success');
+        fetchClickHouseSettings();
+    } catch (err) {
+        showChSettingsFeedback(`儲存失敗: ${err.message}`, 'error');
+    } finally {
+        if (els.btnSaveChSettings) els.btnSaveChSettings.disabled = false;
     }
 }
 

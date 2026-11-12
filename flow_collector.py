@@ -15,6 +15,27 @@ from zoneinfo import ZoneInfo
 from typing import Dict, Tuple, List, Any
 import clickhouse_connect
 
+# Helper to automatically load .env if present
+def load_env_file(env_path: str = None):
+    if env_path is None:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.isfile(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip()
+                        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                            v = v[1:-1]
+                        if k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+load_env_file()
+
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 def now_tw_str() -> str:
@@ -28,19 +49,46 @@ class ClickHouseWriter:
     def __init__(self, q: queue.Queue):
         self.q = q
         self.client = None
-        self.ch_host = os.getenv("CLICKHOUSE_HOST", "192.168.10.12")
+        self.ch_host = os.getenv("CLICKHOUSE_HOST", "192.168.21.185")
         self.ch_port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
         self.ch_user = os.getenv("CLICKHOUSE_USER", "admin")
         self.ch_password = os.getenv("CLICKHOUSE_PASSWORD", "111aaaBBB")
+        self.ch_database = os.getenv("CLICKHOUSE_DB", "default")
         self.buffer = []  # Local queue backup if ClickHouse goes down
 
+    def load_ch_config(self):
+        try:
+            import sqlite3
+            db_path = os.getenv("SQLITE_DB_PATH", "/data/flows.db")
+            if not os.path.exists(db_path): db_path = "flows.db"
+            if os.path.exists(db_path):
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute("SELECT key, value FROM system_settings WHERE key LIKE 'clickhouse_%'")
+                settings = dict(cur.fetchall())
+                conn.close()
+                if "clickhouse_host" in settings and settings["clickhouse_host"]:
+                    self.ch_host = settings["clickhouse_host"]
+                if "clickhouse_port" in settings and settings["clickhouse_port"]:
+                    self.ch_port = int(settings["clickhouse_port"])
+                if "clickhouse_user" in settings and settings["clickhouse_user"]:
+                    self.ch_user = settings["clickhouse_user"]
+                if "clickhouse_password" in settings and settings["clickhouse_password"] is not None:
+                    self.ch_password = settings["clickhouse_password"]
+                if "clickhouse_database" in settings and settings["clickhouse_database"]:
+                    self.ch_database = settings["clickhouse_database"]
+        except Exception:
+            pass
+
     def init_client(self):
-        print(f"[ClickHouseWriter] Connecting to ClickHouse at {self.ch_host}:{self.ch_port}...", file=sys.stderr)
+        self.load_ch_config()
+        print(f"[ClickHouseWriter] Connecting to ClickHouse at {self.ch_host}:{self.ch_port} (db: {self.ch_database})...", file=sys.stderr)
         self.client = clickhouse_connect.get_client(
             host=self.ch_host,
             port=self.ch_port,
             username=self.ch_user,
-            password=self.ch_password
+            password=self.ch_password,
+            database=self.ch_database
         )
         
         # Determine retention days from settings

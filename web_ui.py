@@ -19,6 +19,59 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+# Helper to automatically load .env if present
+def load_env_file(env_path: str = None):
+    if env_path is None:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.isfile(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip()
+                        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                            v = v[1:-1]
+                        if k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+load_env_file()
+
+def update_env_file_kv(updates: dict):
+    """Synchronize key-value configuration into local .env file if it exists."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(env_path):
+        return
+    try:
+        lines = []
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        found_keys = set()
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, _ = stripped.split("=", 1)
+                k = k.strip()
+                if k in updates:
+                    new_lines.append(f"{k}={updates[k]}\n")
+                    found_keys.add(k)
+                    continue
+            new_lines.append(line)
+        
+        for k, v in updates.items():
+            if k not in found_keys:
+                new_lines.append(f"{k}={v}\n")
+                
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    except Exception as e:
+        print(f"[Warning] Failed to update .env: {e}")
+
 # Standard Taiwan Timezone (UTC+8)
 TW_TZ = ZoneInfo("Asia/Taipei")
 
@@ -148,22 +201,25 @@ ch_thread_local = threading.local()
 
 def get_ch_client():
     if not hasattr(ch_thread_local, "client") or ch_thread_local.client is None:
-        _ch_host = os.getenv("CLICKHOUSE_HOST", "192.168.10.12")
-        _ch_port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
-        _ch_user = os.getenv("CLICKHOUSE_USER", "admin")
-        _ch_password = os.getenv("CLICKHOUSE_PASSWORD", "111aaaBBB")
+        _ch_host = get_system_setting("clickhouse_host", os.getenv("CLICKHOUSE_HOST", "192.168.21.185"))
+        _ch_port = int(get_system_setting("clickhouse_port", os.getenv("CLICKHOUSE_PORT", "8123")))
+        _ch_user = get_system_setting("clickhouse_user", os.getenv("CLICKHOUSE_USER", "admin"))
+        _ch_password = get_system_setting("clickhouse_password", os.getenv("CLICKHOUSE_PASSWORD", "111aaaBBB"))
+        _ch_database = get_system_setting("clickhouse_database", os.getenv("CLICKHOUSE_DB", "default"))
         ch_thread_local.client = clickhouse_connect.get_client(
             host=_ch_host,
             port=_ch_port,
             username=_ch_user,
-            password=_ch_password
+            password=_ch_password,
+            database=_ch_database
         )
     return ch_thread_local.client
 
 def reset_ch_client():
     if hasattr(ch_thread_local, "client"):
         try:
-            ch_thread_local.client.close()
+            if ch_thread_local.client is not None:
+                ch_thread_local.client.close()
         except Exception:
             pass
         ch_thread_local.client = None
@@ -744,6 +800,11 @@ def init_db():
         cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_next_run', '', ?)", (tw_now,))
         cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_last_status', 'never', ?)", (tw_now,))
         cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('retention_last_message', '排程尚未執行', ?)", (tw_now,))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('clickhouse_host', ?, ?)", (os.getenv("CLICKHOUSE_HOST", "192.168.21.185"), tw_now))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('clickhouse_port', ?, ?)", (os.getenv("CLICKHOUSE_PORT", "8123"), tw_now))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('clickhouse_user', ?, ?)", (os.getenv("CLICKHOUSE_USER", "admin"), tw_now))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('clickhouse_password', ?, ?)", (os.getenv("CLICKHOUSE_PASSWORD", "111aaaBBB"), tw_now))
+        cur.execute("INSERT OR IGNORE INTO system_settings (key, value, updated_at) VALUES ('clickhouse_database', ?, ?)", (os.getenv("CLICKHOUSE_DB", "default"), tw_now))
 
         # Initialize users table
         cur.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -1067,6 +1128,13 @@ class RetentionSettingsRequest(BaseModel):
     retention_days: int = Field(..., ge=1, le=3650)
     schedule_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
     enabled: bool = True
+
+class ClickHouseSettingsRequest(BaseModel):
+    host: str = Field(..., min_length=1)
+    port: int = Field(8123, ge=1, le=65535)
+    user: str = Field("admin", min_length=1)
+    password: Optional[str] = ""
+    database: str = Field("default", min_length=1)
 
 # ---------------- Authentication Middleware ----------------
 @app.middleware("http")
@@ -1407,6 +1475,131 @@ def execute_retention_manual():
     if res.get("status") == "failed":
         raise HTTPException(status_code=500, detail=res.get("message"))
     return res
+
+# ---------------- ClickHouse Settings API ----------------
+@app.get("/api/settings/clickhouse")
+def get_clickhouse_settings():
+    """Retrieve ClickHouse connection settings and connection status."""
+    host = get_system_setting("clickhouse_host", os.getenv("CLICKHOUSE_HOST", "192.168.21.185"))
+    port = int(get_system_setting("clickhouse_port", os.getenv("CLICKHOUSE_PORT", "8123")))
+    user = get_system_setting("clickhouse_user", os.getenv("CLICKHOUSE_USER", "admin"))
+    password = get_system_setting("clickhouse_password", os.getenv("CLICKHOUSE_PASSWORD", "111aaaBBB"))
+    database = get_system_setting("clickhouse_database", os.getenv("CLICKHOUSE_DB", "default"))
+    
+    # Check current connection status
+    status = "disconnected"
+    version = ""
+    error_msg = ""
+    try:
+        client = get_ch_client()
+        ver_rows = client.query("SELECT version()").result_rows
+        if ver_rows:
+            version = str(ver_rows[0][0])
+            status = "connected"
+    except Exception as e:
+        error_msg = str(e)
+        status = "error"
+        
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "database": database,
+        "status": status,
+        "version": version,
+        "error": error_msg
+    }
+
+@app.post("/api/settings/clickhouse/test")
+def test_clickhouse_connection(payload: ClickHouseSettingsRequest):
+    """Test ClickHouse connection with provided credentials without saving."""
+    try:
+        temp_client = clickhouse_connect.get_client(
+            host=payload.host.strip(),
+            port=payload.port,
+            username=payload.user.strip(),
+            password=payload.password or "",
+            database=payload.database.strip(),
+            connect_timeout=5
+        )
+        ver_rows = temp_client.query("SELECT version()").result_rows
+        version = str(ver_rows[0][0]) if ver_rows else "Unknown"
+        temp_client.close()
+        return {
+            "status": "success",
+            "message": f"連線測試成功！ClickHouse 版本：{version}",
+            "version": version
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"連線失敗：{str(e)}"
+        }
+
+@app.post("/api/settings/clickhouse")
+def update_clickhouse_settings(payload: ClickHouseSettingsRequest):
+    """Save new ClickHouse settings, verify connection, and initialize tables."""
+    host = payload.host.strip()
+    port = payload.port
+    user = payload.user.strip()
+    password = payload.password or ""
+    database = payload.database.strip()
+    
+    # 1. Test connection first
+    try:
+        test_client = clickhouse_connect.get_client(
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
+            connect_timeout=6
+        )
+        ver_rows = test_client.query("SELECT version()").result_rows
+        version = str(ver_rows[0][0]) if ver_rows else "Unknown"
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"無法連線至指定的 ClickHouse 伺服器：{e}")
+        
+    # 2. Save settings to SQLite system_settings
+    set_system_setting("clickhouse_host", host)
+    set_system_setting("clickhouse_port", str(port))
+    set_system_setting("clickhouse_user", user)
+    set_system_setting("clickhouse_password", password)
+    set_system_setting("clickhouse_database", database)
+    
+    # 3. Synchronize to .env file if it exists
+    update_env_file_kv({
+        "CLICKHOUSE_HOST": host,
+        "CLICKHOUSE_PORT": str(port),
+        "CLICKHOUSE_USER": user,
+        "CLICKHOUSE_PASSWORD": password,
+        "CLICKHOUSE_DB": database
+    })
+    
+    # 4. Reset thread-local clients so subsequent queries use the new connection
+    reset_ch_client()
+    
+    # 5. Initialize tables on the target database if not present
+    try:
+        init_clickhouse_tables(test_client)
+    except Exception as init_err:
+        print(f"[Warning] Failed to initialize tables on new ClickHouse: {init_err}")
+    finally:
+        try:
+            test_client.close()
+        except Exception:
+            pass
+            
+    return {
+        "status": "success",
+        "message": f"ClickHouse 連線設定已儲存並成功切換！(版本: {version})",
+        "host": host,
+        "port": port,
+        "user": user,
+        "database": database,
+        "version": version
+    }
 
 # ---------------- Collector Allowed CIDRs API ----------------
 @app.get("/api/settings/collector/cidrs")
